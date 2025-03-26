@@ -1,4 +1,4 @@
-use std::{fmt::format, net::UdpSocket};
+use std::{fmt::format, net::UdpSocket, vec};
 
 pub struct Transmitter {
     radio_port: u16,
@@ -65,8 +65,23 @@ impl Transmitter {
         let udp_receiver = UdpSocket::bind(format!("0.0.0.0:{}", self.udp_port))
             .expect("Failed to bind to udp port");
 
+        assert!(self.buffer_size > 0);
+        let mut buffer: Vec<u8> = vec![0; self.buffer_size];
+        //TODO own thread for the udp socket polling
+        loop {
+            match udp_receiver.recv(&mut buffer) {
+                Ok(datasize) => {
+                    println!("Received data with length {}: {:?}", datasize, buffer);
 
+                    // TODO header
 
-        loop {}
+                    // TODO inject packet into wifistick 
+
+                }
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                }
+            }
+        }
     }
 }

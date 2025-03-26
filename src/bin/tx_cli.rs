@@ -22,7 +22,7 @@ struct Args {
     udp_port: u16,
 
     /// Receiving Buffer Size
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short, long, default_value_t = 1024)]
     buffer_size: usize,
 
     /// FEC delay
