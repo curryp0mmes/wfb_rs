@@ -1,5 +1,9 @@
+use std::time::Duration;
+
 use clap::Parser;
 use wfb_rs::Transmitter;
+
+use wfb_rs::common::{Bandwidth, Bandwidth::*};
 
 /// Receiving side of wfb_rs
 #[derive(Parser, Debug)]
@@ -30,8 +34,8 @@ struct Args {
     fec_delay: u32,
 
     /// Bandwidth
-    #[arg(short='B', long, default_value_t = 20)]
-    bandwidth: u32,
+    #[arg(short='B', long, default_value_t = Bw20, value_parser = clap::value_parser!(Bandwidth))]
+    bandwidth: Bandwidth,
 
     /// Short GI
     #[arg(short='G', long, default_value_t = false)]
@@ -39,19 +43,19 @@ struct Args {
 
     /// STBC
     #[arg(short, long, default_value_t = 1)]
-    stbc: u32,
+    stbc: u8,
 
     /// LDPC
-    #[arg(short, long, default_value_t = 1)]
-    ldpc: u32,
+    #[arg(short, long, default_value_t = true)]
+    ldpc: bool,
 
     /// MCS Index
     #[arg(short, long, default_value_t = 9)]
-    mcs_index: u32,
+    mcs_index: u8,
 
     /// vht nss
     #[arg(short, long, default_value_t = 1)]
-    vht_nss: u32,
+    vht_nss: u8,
 
     /// Debug Port
     #[arg(short, long, default_value_t = 0)]
@@ -62,8 +66,8 @@ struct Args {
     fec_timeout: u64,
 
     /// Log Interval
-    #[arg(short='I', long, default_value_t = 1000)]
-    log_interval: u64,
+    #[arg(short='I', long, default_value = "1000", value_parser = parse_duration)]
+    log_interval: Duration,
 
     /// Link ID
     #[arg(short='i', long, default_value_t = 0)]
@@ -78,8 +82,8 @@ struct Args {
     mirror: bool,
 
     /// VHT Mode
-    #[arg(short='t', long, default_value_t = 0)]
-    vht_mode: u32,
+    #[arg(short='t', long, default_value_t = false)]
+    vht_mode: bool,
 
     /// Control Port
     #[arg(short, long, default_value_t = 9000)]
@@ -91,12 +95,17 @@ struct Args {
     // TODO args frametype, qdisc, fwmark, other modes?
 }
 
+fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
+    let seconds = arg.parse()?;
+    Ok(std::time::Duration::from_secs(seconds))
+}
+
 fn main() {
     let args = Args::parse();
 
     println!("{:?}", args);
 
-    let tx = Transmitter::new(
+    let mut tx = Transmitter::new(
         args.radio_port,
         args.buffer_size,
         args.log_interval,
@@ -109,6 +118,7 @@ fn main() {
         args.stbc,
         args.ldpc,
         args.mcs_index,
+        args.vht_mode,
         args.vht_nss,
         args.debug_port,
         args.fec_timeout,

@@ -33,7 +33,7 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let rx = Receiver::new(
+    let _rx = Receiver::new(
         args.client_address,
         args.client_port,
         args.radio_port,
