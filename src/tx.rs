@@ -84,7 +84,7 @@ impl Transmitter {
         });
 
         let wificard_file_descriptor = open_socket_for_interface(
-            "wlan0"
+            self.wifi_device.as_str(),
         )
         .unwrap_or_else(|e| {
             println!("Error opening wifi socket: {:?}", e);
