@@ -1,8 +1,8 @@
-use nix::cmsg_space;
+use nix::{cmsg_space, libc};
 use nix::net::if_::if_nametoindex;
 use nix::poll::PollFlags;
 use nix::sys::socket::{
-    self, AddressFamily, MsgFlags, SockFlag, SockProtocol, SockType, SockaddrIn, SockaddrStorage
+    self, AddressFamily, MsgFlags, SockFlag, SockProtocol, SockType, SockaddrIn, SockaddrLike, SockaddrStorage
 };
 use std::io::{IoSlice, IoSliceMut};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
@@ -164,7 +164,13 @@ impl Transmitter {
             &[],
             MsgFlags::empty(),
             None,
-        );
+        ) as Result<usize, nix::Error>;
+
+        if let Err(e) = sent_size {
+            println!("Error sending message: {:?}", e);
+        } else {
+            println!("Sent {} bytes", sent_size.unwrap());
+        }
     }
 }
 
@@ -213,9 +219,28 @@ fn open_socket_for_interface(
         SockProtocol::Raw,
     )?;
 
+    //TODO Disable qdisc
+
     let ifindex = if_nametoindex(interface_name).expect(format!("Interface {} not found", interface_name).as_str());
 
-    let sockaddr = SockaddrIn::new(0, 0, 0, 0, 0);
+    assert!(ifindex > 0, "Invalid interface index");
+
+    //TODO make this safe
+    let sockaddr: SockaddrStorage = unsafe {
+        let sa = libc::sockaddr_ll {
+            sll_family: AddressFamily::Packet as u16,
+            sll_protocol: SockProtocol::Raw as u16,
+            sll_ifindex: ifindex as i32,
+            sll_hatype: 0,
+            sll_pkttype: 0,
+            sll_halen: 0,
+            sll_addr: [0; 8],
+        };
+        SockaddrStorage::from_raw(
+            &sa as *const libc::sockaddr_ll as *const libc::sockaddr,
+            Some(size_of::<libc::sockaddr_ll>() as u32)
+        ).expect("Failed to create sockaddr_ll")
+    };
 
     // Bind
     if let Err(e) = socket::bind(file_descriptor.as_raw_fd(), &sockaddr) {
