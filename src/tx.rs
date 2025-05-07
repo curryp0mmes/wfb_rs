@@ -96,7 +96,10 @@ impl Transmitter {
             udp_file_descriptor.as_raw_fd()
         );
 
-        let log_time = Instant::now() + self.log_interval;
+        let mut log_time = Instant::now() + self.log_interval;
+
+        let mut sent_packets: u32 = 0;
+        let mut sent_bytes: u64 = 0;
         //TODO own thread for the udp socket polling
         loop {
             let time_until_next_log = log_time.saturating_duration_since(Instant::now());
@@ -114,7 +117,13 @@ impl Transmitter {
 
             if time_until_next_log.is_zero() {
                 println!("Log time reached, logging data...");
-                //TODO
+                println!(
+                    "Sent {} packets,\t\t {} bytes",
+                    sent_packets, sent_bytes
+                );
+                sent_packets = 0;
+                sent_bytes = 0;
+                log_time = Instant::now() + self.log_interval;
             }
 
             if received_count == 0 {
@@ -138,7 +147,19 @@ impl Transmitter {
                 std::process::exit(1);
             });
 
-            self.send_packet(wificard_file_descriptor.as_fd(), msg);
+            let sent_size = self.send_packet(wificard_file_descriptor.as_fd(), msg);
+
+            if let Err(e) = sent_size {
+                println!("Error sending packet: {:?}", e);
+            } else {
+                let sent_size = sent_size.unwrap();
+                if sent_size == 0 {
+                    println!("No data sent");
+                } else {
+                    sent_bytes += sent_size as u64;
+                    sent_packets += 1;
+                }
+            }
         }
     }
 
@@ -146,7 +167,7 @@ impl Transmitter {
         &mut self,
         file_descriptor: BorrowedFd,
         msg: socket::RecvMsg<SockaddrStorage>,
-    ) {
+    ) -> Result<usize, nix::Error> {
         let ieee_header = get_ieee80211_header(0x08, self.channel_id, self.ieee_sequence);
         self.ieee_sequence += 16;
 
@@ -158,19 +179,13 @@ impl Transmitter {
             io_vector.push(IoSlice::new(iov));
         }
 
-        let sent_size = socket::sendmsg::<SockaddrStorage>(
+        socket::sendmsg::<SockaddrStorage>(
             file_descriptor.as_raw_fd(),
             &io_vector,
             &[],
             MsgFlags::empty(),
             None,
-        ) as Result<usize, nix::Error>;
-
-        if let Err(e) = sent_size {
-            println!("Error sending message: {:?}", e);
-        } else {
-            println!("Sent {} bytes", sent_size.unwrap());
-        }
+        ) as Result<usize, nix::Error>
     }
 }
 

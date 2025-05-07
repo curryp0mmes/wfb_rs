@@ -34,7 +34,7 @@ struct Args {
     fec_delay: u32,
 
     /// Bandwidth
-    #[arg(short='B', long, default_value_t = Bw20, value_parser = clap::value_parser!(Bandwidth))]
+    #[arg(short='B', long, default_value = "bw20", value_parser = clap::value_parser!(Bandwidth))]
     bandwidth: Bandwidth,
 
     /// Short GI
