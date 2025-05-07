@@ -96,8 +96,8 @@ struct Args {
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
-    let seconds = arg.parse()?;
-    Ok(std::time::Duration::from_secs(seconds))
+    let milliseconds = arg.parse()?;
+    Ok(std::time::Duration::from_millis(milliseconds))
 }
 
 fn main() {

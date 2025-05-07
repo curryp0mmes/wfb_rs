@@ -1,6 +1,6 @@
 use nix::{cmsg_space, libc};
 use nix::net::if_::if_nametoindex;
-use nix::poll::PollFlags;
+use nix::poll::{PollFlags, PollTimeout};
 use nix::sys::socket::{
     self, AddressFamily, MsgFlags, SockFlag, SockProtocol, SockType, SockaddrIn, SockaddrLike, SockaddrStorage
 };
@@ -88,6 +88,7 @@ impl Transmitter {
         )
         .unwrap_or_else(|e| {
             println!("Error opening wifi socket: {:?}", e);
+            println!("Make sure you have the right permissions, try running as root");
             std::process::exit(1);
         });
 
@@ -103,20 +104,19 @@ impl Transmitter {
         //TODO own thread for the udp socket polling
         loop {
             let time_until_next_log = log_time.saturating_duration_since(Instant::now());
-            let poll_timeout = time_until_next_log.as_millis();
+            let poll_timeout = time_until_next_log.as_millis() as u16;
 
             let mut pollfds = vec![nix::poll::PollFd::new(
                 udp_file_descriptor.as_fd(),
                 PollFlags::POLLIN,
             )];
-            let received_count: i32 = nix::poll::poll(&mut pollfds, poll_timeout as u16)
+            let received_count: i32 = nix::poll::poll(&mut pollfds, PollTimeout::from(poll_timeout))
                 .unwrap_or_else(|e| {
                     println!("Error polling: {:?}", e);
                     std::process::exit(1);
                 });
 
             if time_until_next_log.is_zero() {
-                println!("Log time reached, logging data...");
                 println!(
                     "Sent {} packets,\t\t {} bytes",
                     sent_packets, sent_bytes
@@ -262,9 +262,6 @@ fn open_socket_for_interface(
         let _ = drop(file_descriptor);
         return Err(e);
     }
-
-
-
 
     Ok(file_descriptor)
 }
