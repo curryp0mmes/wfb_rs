@@ -5,6 +5,14 @@ use wfb_rs::Receiver;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// FEC k
+    #[arg(short, default_value_t = 8)]
+    k: u32,
+
+    /// FEC n
+    #[arg(short, default_value_t = 12)]
+    n: u32,
+
     /// Forwarding Address
     #[arg(short = 'c', long, default_value = "127.0.0.1")]
     client_address: String,

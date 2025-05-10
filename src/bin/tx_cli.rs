@@ -3,17 +3,17 @@ use std::time::Duration;
 use clap::Parser;
 use wfb_rs::Transmitter;
 
-use wfb_rs::common::{Bandwidth, Bandwidth::*};
+use wfb_rs::common::Bandwidth;
 
 /// Receiving side of wfb_rs
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// k
+    /// FEC k
     #[arg(short, long, default_value_t = 8)]
     k: u32,
 
-    /// n
+    /// FEC n
     #[arg(short, long, default_value_t = 12)]
     n: u32,
 
@@ -107,6 +107,7 @@ fn main() {
 
     let mut tx = Transmitter::new(
         args.radio_port,
+        args.link_id,
         args.buffer_size,
         args.log_interval,
         args.k,

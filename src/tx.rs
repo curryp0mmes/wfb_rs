@@ -12,7 +12,6 @@ use std::vec;
 use crate::common::{self, get_ieee80211_header, Bandwidth};
 
 pub struct Transmitter {
-    radio_port: u16,
     buffer_size: usize,
     log_interval: Duration,
     k: u32,
@@ -32,6 +31,7 @@ pub struct Transmitter {
 impl Transmitter {
     pub fn new(
         radio_port: u16,
+        link_id: u32,
         buffer_size: usize,
         log_interval: Duration,
         k: u32,
@@ -54,7 +54,6 @@ impl Transmitter {
         );
 
         Self {
-            radio_port,
             buffer_size,
             log_interval,
             k,
@@ -66,7 +65,7 @@ impl Transmitter {
             wifi_device,
             radiotap_header,
             ieee_sequence: 0,
-            channel_id: 0,
+            channel_id: link_id << 8 + radio_port,
         }
     }
 
