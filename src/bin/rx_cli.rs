@@ -25,6 +25,10 @@ struct Args {
     #[arg(short = 'p', long, default_value_t = 0)]
     radio_port: u16,
 
+    /// Link ID
+    #[arg(short = 'l', long, default_value_t = 0)]
+    link_id: u32,
+
     /// Receiving Buffer Size
     #[arg(short, long, default_value_t = 0)]
     buffer_size: usize,
@@ -45,6 +49,7 @@ fn main() {
         args.client_address,
         args.client_port,
         args.radio_port,
+        args.link_id,
         args.buffer_size,
         args.log_interval,
         args.wifi_device,
