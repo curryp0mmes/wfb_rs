@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::time::Duration;
 use wfb_rs::Receiver;
 
 /// Receiving side of wfb_rs
@@ -34,12 +35,17 @@ struct Args {
     buffer_size: usize,
 
     /// Log Interval
-    #[arg(short='I', long, default_value_t = 1000)]
-    log_interval: u64,
+    #[arg(short='I', long, default_value = "1000", value_parser = parse_duration)]
+    log_interval: Duration,
 
     /// Wifi Device
     wifi_device: String,
     // TODO add args other modes?
+}
+
+fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
+    let milliseconds = arg.parse()?;
+    Ok(std::time::Duration::from_millis(milliseconds))
 }
 
 fn main() {

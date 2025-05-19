@@ -25,11 +25,12 @@ static RADIOTAP_HEADER_VHT: [u8; 22] = [
 ];
 
 static IEEE80211_HEADER: [u8; 24] = [
-    0x08, 0x01, 0x00, 0x00,               // data frame, not protected, from STA to DS via an AP, duration not set
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,   // receiver is broadcast
-    0x57, 0x42, 0xaa, 0xbb, 0xcc, 0xdd,   // last four bytes will be replaced by channel_id
-    0x57, 0x42, 0xaa, 0xbb, 0xcc, 0xdd,   // last four bytes will be replaced by channel_id
-    0x00, 0x00,                           // (seq_num << 4) + fragment_num
+    0x08, 0x01, 0x00,
+    0x00, // data frame, not protected, from STA to DS via an AP, duration not set
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // receiver is broadcast
+    0x57, 0x42, 0xaa, 0xbb, 0xcc, 0xdd, // last four bytes will be replaced by channel_id
+    0x57, 0x42, 0xaa, 0xbb, 0xcc, 0xdd, // last four bytes will be replaced by channel_id
+    0x00, 0x00, // (seq_num << 4) + fragment_num
 ];
 
 pub fn get_ieee80211_header(frame_type: u8, channel_id: u32, ieee_seq: u16) -> Vec<u8> {
@@ -41,7 +42,6 @@ pub fn get_ieee80211_header(frame_type: u8, channel_id: u32, ieee_seq: u16) -> V
     header[22..24].copy_from_slice(&ieee_seq.to_le_bytes()); // dont ask why, but this is the correct order
     header
 }
-
 
 pub fn get_radiotap_headers(
     stbc: u8,
@@ -98,7 +98,7 @@ pub fn get_radiotap_headers(
             Bandwidth::Bw10 | Bandwidth::Bw20 => 0x0,
             Bandwidth::Bw40 => 0x1,
             Bandwidth::Bw80 => 0x4,
-            Bandwidth::Bw160 => 0xB
+            Bandwidth::Bw160 => 0xB,
         };
 
         if ldpc {

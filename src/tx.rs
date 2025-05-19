@@ -1,9 +1,10 @@
-use nix::{cmsg_space, libc};
 use nix::net::if_::if_nametoindex;
 use nix::poll::{PollFlags, PollTimeout};
 use nix::sys::socket::{
-    self, AddressFamily, MsgFlags, SockFlag, SockProtocol, SockType, SockaddrIn, SockaddrLike, SockaddrStorage
+    self, AddressFamily, MsgFlags, SockFlag, SockProtocol, SockType, SockaddrIn, SockaddrLike,
+    SockaddrStorage,
 };
+use nix::{cmsg_space, libc};
 use std::io::{IoSlice, IoSliceMut};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::time::{Duration, Instant};
@@ -82,14 +83,12 @@ impl Transmitter {
             std::process::exit(1);
         });
 
-        let wificard_file_descriptor = open_socket_for_interface(
-            self.wifi_device.as_str(),
-        )
-        .unwrap_or_else(|e| {
-            println!("Error opening wifi socket: {:?}", e);
-            println!("Make sure you have the right permissions, try running as root");
-            std::process::exit(1);
-        });
+        let wificard_file_descriptor = open_socket_for_interface(self.wifi_device.as_str())
+            .unwrap_or_else(|e| {
+                println!("Error opening wifi socket: {:?}", e);
+                println!("Make sure you have the right permissions, try running as root");
+                std::process::exit(1);
+            });
 
         println!(
             "UDP socket opened with fd: {}",
@@ -109,17 +108,16 @@ impl Transmitter {
                 udp_file_descriptor.as_fd(),
                 PollFlags::POLLIN,
             )];
-            let received_count: i32 = nix::poll::poll(&mut pollfds, PollTimeout::from(poll_timeout))
-                .unwrap_or_else(|e| {
-                    println!("Error polling: {:?}", e);
-                    std::process::exit(1);
-                });
+            let received_count: i32 =
+                nix::poll::poll(&mut pollfds, PollTimeout::from(poll_timeout)).unwrap_or_else(
+                    |e| {
+                        println!("Error polling: {:?}", e);
+                        std::process::exit(1);
+                    },
+                );
 
             if time_until_next_log.is_zero() {
-                println!(
-                    "Sent {} packets,\t\t {} bytes",
-                    sent_packets, sent_bytes
-                );
+                println!("Sent {} packets,\t\t {} bytes", sent_packets, sent_bytes);
                 sent_packets = 0;
                 sent_bytes = 0;
                 log_time = Instant::now() + self.log_interval;
@@ -171,8 +169,8 @@ impl Transmitter {
         self.ieee_sequence += 16;
 
         let mut io_vector = vec![
-            IoSlice::new(&self.radiotap_header), 
-            IoSlice::new(&ieee_header)
+            IoSlice::new(&self.radiotap_header),
+            IoSlice::new(&ieee_header),
         ];
         for iov in msg.iovs() {
             io_vector.push(IoSlice::new(iov));
@@ -223,9 +221,7 @@ fn open_udp_socket_for_rx(
 }
 
 //TODO complete this function
-fn open_socket_for_interface(
-    interface_name: &str,
-) -> Result<OwnedFd, nix::Error> {
+fn open_socket_for_interface(interface_name: &str) -> Result<OwnedFd, nix::Error> {
     let file_descriptor = socket::socket(
         AddressFamily::Packet,
         SockType::Raw,
@@ -235,7 +231,8 @@ fn open_socket_for_interface(
 
     //TODO Disable qdisc
 
-    let ifindex = if_nametoindex(interface_name).expect(format!("Interface {} not found", interface_name).as_str());
+    let ifindex = if_nametoindex(interface_name)
+        .expect(format!("Interface {} not found", interface_name).as_str());
 
     assert!(ifindex > 0, "Invalid interface index");
 
@@ -252,8 +249,9 @@ fn open_socket_for_interface(
         };
         SockaddrStorage::from_raw(
             &sa as *const libc::sockaddr_ll as *const libc::sockaddr,
-            Some(size_of::<libc::sockaddr_ll>() as u32)
-        ).expect("Failed to create sockaddr_ll")
+            Some(size_of::<libc::sockaddr_ll>() as u32),
+        )
+        .expect("Failed to create sockaddr_ll")
     };
 
     // Bind
@@ -264,4 +262,3 @@ fn open_socket_for_interface(
 
     Ok(file_descriptor)
 }
-

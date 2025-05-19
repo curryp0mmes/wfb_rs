@@ -38,7 +38,7 @@ struct Args {
     bandwidth: Bandwidth,
 
     /// Short GI
-    #[arg(short='G', long, default_value_t = false)]
+    #[arg(short = 'G', long, default_value_t = false)]
     short_gi: bool,
 
     /// STBC
@@ -62,7 +62,7 @@ struct Args {
     debug_port: u16,
 
     /// FEC Timeout
-    #[arg(short='F', long, default_value_t = 1000)]
+    #[arg(short = 'F', long, default_value_t = 1000)]
     fec_timeout: u64,
 
     /// Log Interval
@@ -70,7 +70,7 @@ struct Args {
     log_interval: Duration,
 
     /// Link ID
-    #[arg(short='i', long, default_value_t = 0)]
+    #[arg(short = 'i', long, default_value_t = 0)]
     link_id: u32,
 
     /// Epoch
@@ -78,11 +78,11 @@ struct Args {
     epoch: u64,
 
     /// Mirror mode
-    #[arg(short='M', long, default_value_t = false)]
+    #[arg(short = 'M', long, default_value_t = false)]
     mirror: bool,
 
     /// VHT Mode
-    #[arg(short='t', long, default_value_t = false)]
+    #[arg(short = 't', long, default_value_t = false)]
     vht_mode: bool,
 
     /// Control Port
@@ -91,7 +91,6 @@ struct Args {
 
     /// Wifi Devices
     wifi_device: String,
-
     // TODO args frametype, qdisc, fwmark, other modes?
 }
 
