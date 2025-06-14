@@ -60,4 +60,6 @@ fn main() {
         args.log_interval,
         args.wifi_device,
     );
+
+    _rx.run();
 }

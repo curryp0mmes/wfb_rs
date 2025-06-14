@@ -2,6 +2,7 @@ use nix::sys::socket::{self, SockProtocol, SockType, SockaddrIn};
 use pcap::{self, Active, Capture};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::time::{Duration, Instant};
+use radiotap::Radiotap;
 
 pub struct Receiver {
     client_address: String,
@@ -39,23 +40,39 @@ impl Receiver {
         let mut wifi_capture = self.open_socket_for_interface().unwrap();
 
         let mut log_time = Instant::now() + self.log_interval;
-
+        let mut received_packets_count = 0u64;
         loop {
             let time_until_next_log = log_time.saturating_duration_since(Instant::now());
             let poll_timeout = time_until_next_log.as_millis() as u16;
 
             let received_packet = wifi_capture.next_packet();
-            //TODO process and send packet
+
+            if let Err(e) = received_packet {
+                if e != pcap::Error::TimeoutExpired {
+                    println!("Error receiving packet: {:?}", e);
+                    continue;
+                }
+            } else {
+                let packet = received_packet.unwrap();
+                if packet.len() != 0 {
+                    let radiotap_header = Radiotap::from_bytes(packet.data).unwrap(); //parses the first n bytes as header
+
+                    //TODO process packet
+                    received_packets_count += 1;
+                    println!("Received packet: {:?}", packet);
+                } else {
+                    //len == 0
+                    //TODO reset fec
+                    continue;
+                }
+            }
             if time_until_next_log.is_zero() {
+                println!("Received {} packets", received_packets_count);
+                received_packets_count = 0;
                 //println!("Sent {} packets,\t\t {} bytes", sent_packets, sent_bytes);
                 //sent_packets = 0;
                 //sent_bytes = 0;
                 log_time = Instant::now() + self.log_interval;
-            }
-
-            if received_packet.unwrap().len() == 0 {
-                //TODO reset fec
-                continue;
             }
         }
     }

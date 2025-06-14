@@ -15,12 +15,12 @@ use crate::common::{self, get_ieee80211_header, Bandwidth};
 pub struct Transmitter {
     buffer_size: usize,
     log_interval: Duration,
-    k: u32,
-    n: u32,
+    _k: u32,
+    _n: u32,
     udp_port: u16,
-    fec_delay: u32,
-    debug_port: u16,
-    fec_timeout: u64,
+    _fec_delay: u32,
+    _debug_port: u16,
+    _fec_timeout: u64,
     wifi_device: String,
 
     //private fields
@@ -57,12 +57,12 @@ impl Transmitter {
         Self {
             buffer_size,
             log_interval,
-            k,
-            n,
+            _k: k,
+            _n: n,
             udp_port,
-            fec_delay,
-            debug_port,
-            fec_timeout,
+            _fec_delay: fec_delay,
+            _debug_port: debug_port,
+            _fec_timeout: fec_timeout,
             wifi_device,
             radiotap_header,
             ieee_sequence: 0,
@@ -99,7 +99,7 @@ impl Transmitter {
 
         let mut sent_packets: u32 = 0;
         let mut sent_bytes: u64 = 0;
-        //TODO own thread for the udp socket polling
+        //TODO own thread for the udp socket polling (is it really needed?)
         loop {
             let time_until_next_log = log_time.saturating_duration_since(Instant::now());
             let poll_timeout = time_until_next_log.as_millis() as u16;
