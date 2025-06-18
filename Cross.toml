@@ -1,12 +1,12 @@
 [build]
 default-target = "aarch64-unknown-linux-gnu"
-pre-build = [                                  # additional commands to run prior to building the package
-    "dpkg --add-architecture $CROSS_DEB_ARCH", 
-    "apt-get update && apt-get --assume-yes install libpcap-dev" # for arch use libssl-dev:$CROSS_DEB_ARCH
-]          
+
+[target.aarch64-unknown-linux-gnu]
+dockerfile = "cross/aarch64-unknown-linux-gnu.Dockerfile"
+
 
 [build.env]
 passthrough = [
     "RUSTFLAGS",
-    "RUSTFLAGS=-C target-feature=+crt-static"
+#    "RUSTFLAGS=-C target-feature=+crt-static"
 ]

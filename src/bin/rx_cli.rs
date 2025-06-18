@@ -31,12 +31,16 @@ struct Args {
     link_id: u32,
 
     /// Receiving Buffer Size
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short = 'R', long, default_value_t = 0)]
     buffer_size: usize,
 
     /// Log Interval
     #[arg(short='I', long, default_value = "1000", value_parser = parse_duration)]
     log_interval: Duration,
+
+    /// Key File Location (unused)
+    #[arg(short='K', long)]
+    key_file: String,
 
     /// Wifi Device
     wifi_device: String,

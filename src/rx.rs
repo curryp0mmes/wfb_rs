@@ -103,6 +103,8 @@ impl Receiver {
         let compound_ouput_address = format!("{}:{}", self.client_address, self.client_port);
         let socket_address: SockaddrIn = compound_ouput_address.parse().unwrap();
 
+        println!("Binding to UDP Address {} for Video Out", socket_address);
+
         // Bind
         if let Err(e) = socket::bind(file_descriptor.as_raw_fd(), &socket_address) {
             let _ = drop(file_descriptor);
