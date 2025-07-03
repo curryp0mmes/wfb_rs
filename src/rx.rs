@@ -1,8 +1,9 @@
-use nix::sys::socket::{self, SockProtocol, SockType, SockaddrIn};
-use pcap::{self, Active, Capture};
-use std::os::fd::{AsRawFd, OwnedFd};
-use std::time::{Duration, Instant};
+use pcap::{self, Active, Capture, Packet};
 use radiotap::Radiotap;
+use std::net::UdpSocket;
+use std::time::{Duration, Instant};
+
+use crate::common;
 
 pub struct Receiver {
     client_address: String,
@@ -34,18 +35,23 @@ impl Receiver {
     }
 
     pub fn run(&self) {
-        let udp_file_descriptor = self
-            .open_udp_socket_output(self.buffer_size, SockType::Datagram, SockProtocol::Udp)
-            .unwrap();
-        let mut wifi_capture = self.open_socket_for_interface().unwrap();
+        let compound_ouput_address = format!("{}:{}", self.client_address, self.client_port);
+
+        let udp_socket = UdpSocket::bind("0.0.0.0:5601").unwrap();
+        let connection_output = udp_socket.connect(compound_ouput_address);
+        if let Err(e) = connection_output {
+            println!("Error setting output udp address: {:?}", e);
+            return;
+        }
+        let mut wifi_capture: Capture<Active> = self.open_socket_for_interface().unwrap();
 
         let mut log_time = Instant::now() + self.log_interval;
         let mut received_packets_count = 0u64;
         loop {
             let time_until_next_log = log_time.saturating_duration_since(Instant::now());
-            let poll_timeout = time_until_next_log.as_millis() as u16;
+            //let poll_timeout = time_until_next_log.as_millis() as u16;
 
-            let received_packet = wifi_capture.next_packet();
+            let received_packet: Result<Packet<'_>, pcap::Error> = wifi_capture.next_packet();
 
             if let Err(e) = received_packet {
                 if e != pcap::Error::TimeoutExpired {
@@ -55,11 +61,23 @@ impl Receiver {
             } else {
                 let packet = received_packet.unwrap();
                 if packet.len() != 0 {
-                    let radiotap_header = Radiotap::from_bytes(packet.data).unwrap(); //parses the first n bytes as header
+                    let radiotap_header = Radiotap::from_bytes(packet.data).unwrap(); // parses the first n bytes as header
 
-                    //TODO process packet
+                    // TODO process packet
                     received_packets_count += 1;
-                    println!("Received packet: {:?}", packet);
+                    println!("Received packet: {:?}", radiotap_header);
+
+                    let header_len = radiotap_header.header.length as usize;
+                    let rest_of_packet: &[u8] = &packet.data[header_len..];
+
+                    if rest_of_packet.len() > common::IEEE80211_HEADER.len() {
+                        let rest_of_packet: &[u8] =
+                            &rest_of_packet[common::IEEE80211_HEADER.len()..];
+                        let result = udp_socket.send(rest_of_packet);
+                        if let Err(e) = result {
+                            println!("Error forwarding packet, {:?}", e);
+                        }
+                    }
                 } else {
                     //len == 0
                     //TODO reset fec
@@ -75,43 +93,6 @@ impl Receiver {
                 log_time = Instant::now() + self.log_interval;
             }
         }
-    }
-
-    fn open_udp_socket_output(
-        &self,
-        snd_buf_size: usize,
-        socket_type: SockType,
-        socket_protocol: SockProtocol,
-    ) -> Result<OwnedFd, nix::Error> {
-        // Create socket
-        let file_descriptor = socket::socket(
-            socket::AddressFamily::Inet,
-            socket_type,
-            socket::SockFlag::empty(),
-            socket_protocol,
-        )?;
-
-        if snd_buf_size > 0 {
-            if let Err(e) =
-                socket::setsockopt(&file_descriptor, socket::sockopt::SndBuf, &snd_buf_size)
-            {
-                drop(file_descriptor);
-                return Err(e);
-            }
-        }
-
-        let compound_ouput_address = format!("{}:{}", self.client_address, self.client_port);
-        let socket_address: SockaddrIn = compound_ouput_address.parse().unwrap();
-
-        println!("Binding to UDP Address {} for Video Out", socket_address);
-
-        // Bind
-        if let Err(e) = socket::bind(file_descriptor.as_raw_fd(), &socket_address) {
-            let _ = drop(file_descriptor);
-            return Err(e);
-        }
-
-        Ok(file_descriptor)
     }
 
     fn open_socket_for_interface(&self) -> Result<Capture<Active>, nix::Error> {

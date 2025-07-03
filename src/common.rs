@@ -24,7 +24,7 @@ static RADIOTAP_HEADER_VHT: [u8; 22] = [
     0x00, 0x00, // Partial AID, not used
 ];
 
-static IEEE80211_HEADER: [u8; 24] = [
+pub static IEEE80211_HEADER: [u8; 24] = [
     0x08, 0x01, 0x00,
     0x00, // data frame, not protected, from STA to DS via an AP, duration not set
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // receiver is broadcast
