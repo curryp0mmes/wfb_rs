@@ -34,107 +34,119 @@ impl Receiver {
         }
     }
 
-    pub fn run(&self) {
-        let compound_ouput_address = format!("{}:{}", self.client_address, self.client_port);
-
-        let udp_socket = UdpSocket::bind("0.0.0.0:5601").unwrap();
-        let connection_output = udp_socket.connect(compound_ouput_address);
-        if let Err(e) = connection_output {
-            println!("Error setting output udp address: {:?}", e);
-            return;
-        }
-        let mut wifi_capture: Capture<Active> = self.open_socket_for_interface().unwrap();
+    pub fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let compound_output_address = format!("{}:{}", self.client_address, self.client_port);
+        
+        let udp_socket = UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
+        udp_socket.connect(&compound_output_address)?;
+        
+        let mut wifi_capture = self.open_wifi_capture()?;
 
         let mut log_time = Instant::now() + self.log_interval;
         let mut received_packets_count = 0u64;
+        let mut processed_packets_count = 0u64;
+
         loop {
-            let time_until_next_log = log_time.saturating_duration_since(Instant::now());
-            //let poll_timeout = time_until_next_log.as_millis() as u16;
 
-            let received_packet: Result<Packet<'_>, pcap::Error> = wifi_capture.next_packet();
-
-            if let Err(e) = received_packet {
-                if e != pcap::Error::TimeoutExpired {
-                    println!("Error receiving packet: {:?}", e);
-                    continue;
-                }
-            } else {
-                let packet = received_packet.unwrap();
-                if packet.len() != 0 {
-                    let radiotap_header = Radiotap::from_bytes(packet.data).unwrap(); // parses the first n bytes as header
-
-                    // TODO process packet
+            match wifi_capture.next_packet() {
+                Ok(packet) if packet.len() > 0 => {
                     received_packets_count += 1;
-                    println!("Received packet: {:?}", radiotap_header);
-
-                    let header_len = radiotap_header.header.length as usize;
-                    let rest_of_packet: &[u8] = &packet.data[header_len..];
-
-                    if rest_of_packet.len() > common::IEEE80211_HEADER.len() {
-                        let rest_of_packet: &[u8] =
-                            &rest_of_packet[common::IEEE80211_HEADER.len()..];
-                        let result = udp_socket.send(rest_of_packet);
-                        if let Err(e) = result {
-                            println!("Error forwarding packet, {:?}", e);
+                    
+                    if let Some(payload) = self.process_packet(&packet)? {
+                        if let Err(e) = udp_socket.send(&payload) {
+                            eprintln!("Error forwarding packet: {}", e);
+                        } else {
+                            processed_packets_count += 1;
                         }
                     }
-                } else {
-                    //len == 0
+                }
+                Ok(packet) if packet.len() == 0 => {
                     //TODO reset fec
                     continue;
                 }
+                Ok(_) => {
+                    // Empty packet, continue
+                    continue;
+                }
+                Err(pcap::Error::TimeoutExpired) => {
+                    // Timeout is normal, continue
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("Error receiving packet: {}", e);
+                    continue;
+                }
             }
-            if time_until_next_log.is_zero() {
-                println!("Received {} packets", received_packets_count);
+
+            let now = Instant::now();
+            if now >= log_time {
+                println!("Received {} packets, processed {}", received_packets_count, processed_packets_count);
                 received_packets_count = 0;
-                //println!("Sent {} packets,\t\t {} bytes", sent_packets, sent_bytes);
-                //sent_packets = 0;
-                //sent_bytes = 0;
-                log_time = Instant::now() + self.log_interval;
+                processed_packets_count = 0;
+                log_time = now + self.log_interval;
             }
         }
     }
 
-    fn open_socket_for_interface(&self) -> Result<Capture<Active>, nix::Error> {
-        let wifi_max_size = 4045;
+    fn process_packet(&self, packet: &Packet) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+        let data = packet.data;
 
-        let wifi_card: pcap::Device = pcap::Device::list()
-            .unwrap()
-            .iter()
-            .find(|dev| dev.name == self.wifi_device)
-            .unwrap()
-            .clone();
-        let cap = pcap::Capture::from_device(wifi_card)
-            .unwrap()
-            .snaplen(wifi_max_size + 256)
-            .promisc(true)
-            .timeout(-1)
-            .immediate_mode(true)
-            .open()
-            .unwrap();
-        let cap = cap.setnonblock();
-        if let Err(e) = cap {
-            println!("Error setting non-blocking mode: {}", e);
-            return Err(nix::errno::Errno::EINVAL);
+        if data.len() < 4 {
+            return Ok(None); // Too short for radiotap header
         }
-        let mut cap = cap.unwrap();
+
+        // Parse minimal radiotap header to get length
+        let radiotap_len = u16::from_le_bytes([data[2], data[3]]) as usize;
+
+        //Parse the whole radiotap header via library
+        let _radiotap_header = Radiotap::from_bytes(data)?;
+
+        //println!("Received header: {:?}", radiotap_header);
+        //let header_len = radiotap_header.header.size;
+
+        // Skip radiotap header and IEEE 802.11 header
+        let payload_start = radiotap_len + common::IEEE80211_HEADER.len();
+        
+        if data.len() <= payload_start {
+            return Ok(None); // No payload
+        }
+
+        let payload = &data[payload_start..];
+        
+        if payload.len() > self.buffer_size {
+            return Ok(None); // Payload too large
+        }
+
+        // Basic validation - check if this looks like a WFB packet
+        if payload.len() < 10 {
+            return Ok(None); // Too short for WFB packet
+        }
+
+        Ok(Some(payload.to_vec()))
+    }
+
+    fn open_wifi_capture(&self) -> Result<Capture<Active>, Box<dyn std::error::Error>> {
+        let wifi_max_size = 4096;
+
+        let wifi_card = pcap::Device::list()?
+            .into_iter()
+            .find(|dev| dev.name == self.wifi_device)
+            .ok_or_else(|| format!("WiFi device {} not found", self.wifi_device))?;
+
+        let mut cap = pcap::Capture::from_device(wifi_card)?
+            .snaplen(wifi_max_size)
+            .promisc(true)
+            .timeout(100) // 100ms timeout instead of -1
+            .immediate_mode(true)
+            .open()?;
 
         if cap.get_datalink() != pcap::Linktype::IEEE802_11_RADIOTAP {
-            println!("Unknown encapsulation on interface {}", self.wifi_device);
-            return Err(nix::errno::Errno::EINVAL);
+            return Err(format!("Unknown encapsulation on interface {}", self.wifi_device).into());
         }
 
-        if let Err(e) = cap.filter(
-            format!(
-                "ether[0x0a:2]==0x5742 && ether[0x0c:4] == {:#10x}",
-                self.channel_id
-            )
-            .as_str(),
-            true,
-        ) {
-            println!("Error setting filter: {}", e);
-            return Err(nix::errno::Errno::EINVAL);
-        }
+        // Set the BPF filter to match the original C++ code
+        let filter = format!("ether[0x0a:2]==0x5742 && ether[0x0c:4] == {:#010x}", self.channel_id);
+        cap.filter(&filter, true)?;
 
         Ok(cap)
     }

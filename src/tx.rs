@@ -1,3 +1,4 @@
+use std::fs;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::time::{Duration, Instant};
 use std::mem::{size_of, zeroed};
@@ -70,13 +71,12 @@ impl Transmitter {
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         println!("Binding {} to Port {}", self.wifi_device, self.udp_port);
         
-        let udp_file_descriptor = self.open_udp_socket()?;
-        let wifi_file_descriptor = self.open_raw_socket()?;
+        let udp_file_descriptor = self.open_udp_socket().expect("Could not open udp port");
+        let wifi_file_descriptor = self.open_raw_socket().expect("Error opening wifi socket");
         
         let mut log_time = Instant::now() + self.log_interval;
         let mut sent_packets = 0u32;
         let mut sent_bytes = 0u64;
-        
         loop {
             let timeout = log_time.saturating_duration_since(Instant::now());
             
@@ -171,11 +171,11 @@ impl Transmitter {
         let sockfd = unsafe { 
             libc::socket(libc::PF_PACKET, libc::SOCK_RAW, 0) 
         };
-        
+
         if sockfd < 0 {
-            return Err("Failed to create raw socket".into());
+            return Err("Failed to create raw socket, you need root privileges to do so. Try again with sudo!".into());
         }
-        
+
         let fd = unsafe { OwnedFd::from_raw_fd(sockfd) };
         
         // Set PACKET_QDISC_BYPASS
@@ -196,6 +196,23 @@ impl Transmitter {
         
         if ifindex == 0 {
             return Err(format!("Interface {} not found", self.wifi_device).into());
+        }
+
+        //Checck if wifi card is in monitor mode
+        {
+            let type_path = format!("/sys/class/net/{}/type", self.wifi_device);
+            let type_content = fs::read_to_string(&type_path)
+                .map_err(|_| format!("Interface {} not found or inaccessible", self.wifi_device))?;
+            
+            let interface_type: u32 = type_content.trim().parse()
+                .map_err(|_| "Failed to parse interface type")?;
+            
+            // ARPHRD_IEEE80211_RADIOTAP = 803 (monitor mode)
+            // ARPHRD_ETHER = 1 (managed mode)
+            // ARPHRD_IEEE80211 = 801 (other 802.11 modes)
+            if interface_type != 803 {
+                return Err("Wifi Device is not in monitor mode".into());
+            }
         }
         
         // Bind to interface

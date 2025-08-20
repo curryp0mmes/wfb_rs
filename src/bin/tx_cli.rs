@@ -66,7 +66,7 @@ struct Args {
     debug_port: u16,
 
     /// FEC Timeout
-    #[arg(short = 'F', long, default_value_t = 1000)]
+    #[arg(short = 'T', long, default_value_t = 1000)]
     fec_timeout: u64,
 
     /// Log Interval
@@ -82,7 +82,7 @@ struct Args {
     epoch: u64,
 
     /// Mirror mode
-    #[arg(short = 'M', long, default_value_t = false)]
+    #[arg(short = 'm', long, default_value_t = false)]
     mirror: bool,
 
     /// VHT Mode
@@ -94,7 +94,7 @@ struct Args {
     control_port: u16,
 
     /// Key File Location (unused, just here for compatibility)
-    #[arg(short='K', long)]
+    #[arg(short='K', long, default_value = "")]
     key_file: String,
 
     /// Wifi Devices
@@ -134,5 +134,5 @@ fn main() {
         args.wifi_device,
     );
 
-    tx.run();
+    let _ = tx.run();
 }
