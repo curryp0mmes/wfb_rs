@@ -1,19 +1,13 @@
-use nix::net::if_::if_nametoindex;
-use nix::poll::{PollFlags, PollTimeout};
-use nix::sys::socket::{
-    self, AddressFamily, MsgFlags, SockFlag, SockProtocol, SockType, SockaddrIn, SockaddrLike,
-    SockaddrStorage,
-};
-use nix::{cmsg_space, libc};
-use std::io::{IoSlice, IoSliceMut};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::time::{Duration, Instant};
-use std::vec;
+use std::mem::{size_of, zeroed};
+use std::ffi::CString;
 
 use crate::common::{self, get_ieee80211_header, Bandwidth};
 
 pub struct Transmitter {
-    buffer_size: usize,
+    _buffer_r: usize,
+    _buffer_s: usize,
     log_interval: Duration,
     _k: u32,
     _n: u32,
@@ -31,9 +25,10 @@ pub struct Transmitter {
 
 impl Transmitter {
     pub fn new(
-        radio_port: u16,
+        radio_port: u8,
         link_id: u32,
-        buffer_size: usize,
+        buffer_size_recv: usize,
+        buffer_size_send: usize,
         log_interval: Duration,
         k: u32,
         n: u32,
@@ -53,9 +48,11 @@ impl Transmitter {
         let radiotap_header = common::get_radiotap_headers(
             stbc, ldpc, short_gi, bandwidth, mcs_index, vht_mode, vht_nss,
         );
+        let link_id = link_id & 0xffffff;
 
         Self {
-            buffer_size,
+            _buffer_r: buffer_size_recv,
+            _buffer_s: buffer_size_send,
             log_interval,
             _k: k,
             _n: n,
@@ -66,199 +63,201 @@ impl Transmitter {
             wifi_device,
             radiotap_header,
             ieee_sequence: 0,
-            channel_id: link_id << 8 + radio_port,
+            channel_id: (link_id << 8) + (radio_port as u32),
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         println!("Binding {} to Port {}", self.wifi_device, self.udp_port);
-        let udp_file_descriptor = open_udp_socket_for_rx(
-            SockaddrIn::new(0, 0, 0, 0, self.udp_port),
-            self.buffer_size,
-            SockType::Datagram,
-            SockProtocol::Udp,
-        )
-        .unwrap_or_else(|e| {
-            println!("Error opening UDP socket: {:?}", e);
-            std::process::exit(1);
-        });
-
-        let wificard_file_descriptor = open_socket_for_interface(self.wifi_device.as_str())
-            .unwrap_or_else(|e| {
-                println!("Error opening wifi socket: {:?}", e);
-                println!("Make sure you have the right permissions, try running as root");
-                std::process::exit(1);
-            });
-
-        println!(
-            "UDP socket opened with fd: {}",
-            udp_file_descriptor.as_raw_fd()
-        );
-
+        
+        let udp_file_descriptor = self.open_udp_socket()?;
+        let wifi_file_descriptor = self.open_raw_socket()?;
+        
         let mut log_time = Instant::now() + self.log_interval;
-
-        let mut sent_packets: u32 = 0;
-        let mut sent_bytes: u64 = 0;
-        //TODO own thread for the udp socket polling (is it really needed?)
+        let mut sent_packets = 0u32;
+        let mut sent_bytes = 0u64;
+        
         loop {
-            let time_until_next_log = log_time.saturating_duration_since(Instant::now());
-            let poll_timeout = time_until_next_log.as_millis() as u16;
-
-            let mut pollfds = vec![nix::poll::PollFd::new(
-                udp_file_descriptor.as_fd(),
-                PollFlags::POLLIN,
-            )];
-            let received_count: i32 =
-                nix::poll::poll(&mut pollfds, PollTimeout::from(poll_timeout)).unwrap_or_else(
-                    |e| {
-                        println!("Error polling: {:?}", e);
-                        std::process::exit(1);
-                    },
-                );
-
-            if time_until_next_log.is_zero() {
+            let timeout = log_time.saturating_duration_since(Instant::now());
+            
+            // Poll UDP socket
+            let mut poll_fd = libc::pollfd {
+                fd: udp_file_descriptor.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            
+            let poll_result = unsafe {
+                libc::poll(&mut poll_fd, 1, timeout.as_millis() as i32)
+            };
+            
+            if poll_result < 0 {
+                return Err("Poll error".into());
+            }
+            
+            // Handle timeout
+            if timeout.is_zero() {
                 println!("Sent {} packets,\t\t {} bytes", sent_packets, sent_bytes);
                 sent_packets = 0;
                 sent_bytes = 0;
                 log_time = Instant::now() + self.log_interval;
             }
-
-            if received_count == 0 {
+            
+            if poll_result == 0 {
+                continue; // Timeout, no data
+            }
+            
+            // Read UDP data
+            let mut buf = [0u8; 1500];
+            let received = unsafe {
+                libc::recv(udp_file_descriptor.as_raw_fd(), buf.as_mut_ptr() as *mut libc::c_void, buf.len(), libc::MSG_DONTWAIT)
+            };
+            
+            if received == 0 {
                 //TODO reset fec
                 continue;
             }
 
-            let mut buf = [0u8; 1500]; // payload buffer
-            let mut io_vector = [IoSliceMut::new(&mut buf)];
-
-            let mut cmsg_space = cmsg_space!(u32);
-
-            let msg = socket::recvmsg::<SockaddrStorage>(
-                udp_file_descriptor.as_raw_fd(),
-                &mut io_vector,
-                Some(&mut cmsg_space),
-                MsgFlags::MSG_DONTWAIT,
-            )
-            .unwrap_or_else(|e| {
-                println!("Error receiving message: {:?}", e);
-                std::process::exit(1);
-            });
-
-            let sent_size = self.send_packet(wificard_file_descriptor.as_fd(), msg);
-
-            if let Err(e) = sent_size {
-                println!("Error sending packet: {:?}", e);
-            } else {
-                let sent_size = sent_size.unwrap();
-                if sent_size == 0 {
-                    println!("No data sent");
-                } else {
-                    sent_bytes += sent_size as u64;
-                    sent_packets += 1;
-                }
+            if received > 0 {
+                let sent_size = self.send_packet(&wifi_file_descriptor, &buf[..received as usize])?;
+                sent_bytes += sent_size as u64;
+                sent_packets += 1;
             }
         }
     }
-
-    fn send_packet(
-        &mut self,
-        file_descriptor: BorrowedFd,
-        msg: socket::RecvMsg<SockaddrStorage>,
-    ) -> Result<usize, nix::Error> {
+    
+    fn open_udp_socket(&self) -> Result<OwnedFd, Box<dyn std::error::Error>> {
+        let sockfd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+        if sockfd < 0 {
+            return Err("Failed to create UDP socket".into());
+        }
+        
+        let fd = unsafe { OwnedFd::from_raw_fd(sockfd) };
+        
+        // Set socket options
+        let reuse_addr = 1i32;
+        unsafe {
+            libc::setsockopt(
+                sockfd,
+                libc::SOL_SOCKET,
+                libc::SO_REUSEADDR,
+                &reuse_addr as *const _ as *const libc::c_void,
+                size_of::<i32>() as u32,
+            );
+        }
+        
+        // Bind socket
+        let mut addr: libc::sockaddr_in = unsafe { zeroed() };
+        addr.sin_family = libc::AF_INET as u16;
+        addr.sin_port = (self.udp_port).to_be();
+        addr.sin_addr.s_addr = libc::INADDR_ANY;
+        
+        let bind_result = unsafe {
+            libc::bind(
+                sockfd,
+                &addr as *const _ as *const libc::sockaddr,
+                size_of::<libc::sockaddr_in>() as u32,
+            )
+        };
+        
+        if bind_result < 0 {
+            return Err("Failed to bind UDP socket".into());
+        }
+        
+        Ok(fd)
+    }
+    
+    fn open_raw_socket(&self) -> Result<OwnedFd, Box<dyn std::error::Error>> {
+        let sockfd = unsafe { 
+            libc::socket(libc::PF_PACKET, libc::SOCK_RAW, 0) 
+        };
+        
+        if sockfd < 0 {
+            return Err("Failed to create raw socket".into());
+        }
+        
+        let fd = unsafe { OwnedFd::from_raw_fd(sockfd) };
+        
+        // Set PACKET_QDISC_BYPASS
+        let bypass = 1i32;
+        unsafe {
+            libc::setsockopt(
+                sockfd,
+                libc::SOL_PACKET,
+                libc::PACKET_QDISC_BYPASS,
+                &bypass as *const _ as *const libc::c_void,
+                size_of::<i32>() as u32,
+            );
+        }
+        
+        // Get interface index
+        let ifname = CString::new(self.wifi_device.as_str())?;
+        let ifindex = unsafe { libc::if_nametoindex(ifname.as_ptr()) };
+        
+        if ifindex == 0 {
+            return Err(format!("Interface {} not found", self.wifi_device).into());
+        }
+        
+        // Bind to interface
+        let mut addr: libc::sockaddr_ll = unsafe { zeroed() };
+        addr.sll_family = libc::AF_PACKET as u16;
+        addr.sll_protocol = 0; // We'll specify protocol per packet
+        addr.sll_ifindex = ifindex as i32;
+        
+        let bind_result = unsafe {
+            libc::bind(
+                sockfd,
+                &addr as *const _ as *const libc::sockaddr,
+                size_of::<libc::sockaddr_ll>() as u32,
+            )
+        };
+        
+        if bind_result < 0 {
+            return Err("Failed to bind raw socket".into());
+        }
+        
+        Ok(fd)
+    }
+    
+    fn send_packet(&mut self, wifi_fd: &OwnedFd, data: &[u8]) -> Result<usize, Box<dyn std::error::Error>> {
         let ieee_header = get_ieee80211_header(0x08, self.channel_id, self.ieee_sequence);
         self.ieee_sequence += 16;
-
-        let mut io_vector = vec![
-            IoSlice::new(&self.radiotap_header),
-            IoSlice::new(&ieee_header),
+        
+        // Create iovec for sendmsg
+        let iovecs = [
+            libc::iovec {
+                iov_base: self.radiotap_header.as_ptr() as *mut libc::c_void,
+                iov_len: self.radiotap_header.len(),
+            },
+            libc::iovec {
+                iov_base: ieee_header.as_ptr() as *mut libc::c_void,
+                iov_len: ieee_header.len(),
+            },
+            libc::iovec {
+                iov_base: data.as_ptr() as *mut libc::c_void,
+                iov_len: data.len(),
+            },
         ];
-        for iov in msg.iovs() {
-            io_vector.push(IoSlice::new(iov));
-        }
-
-        socket::sendmsg::<SockaddrStorage>(
-            file_descriptor.as_raw_fd(),
-            &io_vector,
-            &[],
-            MsgFlags::empty(),
-            None,
-        ) as Result<usize, nix::Error>
-    }
-}
-
-fn open_udp_socket_for_rx(
-    socket_address: SockaddrIn,
-    rcv_buf_size: usize,
-    socket_type: SockType,
-    socket_protocol: SockProtocol,
-) -> Result<OwnedFd, nix::Error> {
-    // Create socket
-    let file_descriptor = socket::socket(
-        socket::AddressFamily::Inet,
-        socket_type,
-        socket::SockFlag::empty(),
-        socket_protocol,
-    )?;
-
-    // Set SO_REUSEADDR
-    socket::setsockopt(&file_descriptor, socket::sockopt::ReuseAddr, &true)?;
-
-    // Set SO_RXQ_OVFL
-    socket::setsockopt(&file_descriptor, socket::sockopt::RxqOvfl, &1)?;
-
-    // Set SO_RCVBUF if specified
-    if rcv_buf_size > 0 {
-        socket::setsockopt(&file_descriptor, socket::sockopt::RcvBuf, &rcv_buf_size)?;
-    }
-
-    // Bind
-    if let Err(e) = socket::bind(file_descriptor.as_raw_fd(), &socket_address) {
-        let _ = drop(file_descriptor);
-        return Err(e);
-    }
-
-    Ok(file_descriptor)
-}
-
-//TODO complete this function
-fn open_socket_for_interface(interface_name: &str) -> Result<OwnedFd, nix::Error> {
-    let file_descriptor = socket::socket(
-        AddressFamily::Packet,
-        SockType::Raw,
-        SockFlag::empty(),
-        SockProtocol::Raw,
-    )?;
-
-    //TODO Disable qdisc
-
-    let ifindex = if_nametoindex(interface_name)
-        .expect(format!("Interface {} not found", interface_name).as_str());
-
-    assert!(ifindex > 0, "Invalid interface index");
-
-    //TODO make this safe
-    let sockaddr: SockaddrStorage = unsafe {
-        let sa = libc::sockaddr_ll {
-            sll_family: AddressFamily::Packet as u16,
-            sll_protocol: SockProtocol::Raw as u16,
-            sll_ifindex: ifindex as i32,
-            sll_hatype: 0,
-            sll_pkttype: 0,
-            sll_halen: 0,
-            sll_addr: [0; 8],
+        
+        let msg: libc::msghdr = libc::msghdr {
+            msg_name: std::ptr::null_mut(),
+            msg_namelen: 0,
+            msg_iov: iovecs.as_ptr() as *mut libc::iovec,
+            msg_iovlen: iovecs.len(),
+            msg_control: std::ptr::null_mut(),
+            msg_controllen: 0,
+            msg_flags: 0,
         };
-        SockaddrStorage::from_raw(
-            &sa as *const libc::sockaddr_ll as *const libc::sockaddr,
-            Some(size_of::<libc::sockaddr_ll>() as u32),
-        )
-        .expect("Failed to create sockaddr_ll")
-    };
-
-    // Bind
-    if let Err(e) = socket::bind(file_descriptor.as_raw_fd(), &sockaddr) {
-        let _ = drop(file_descriptor);
-        return Err(e);
+        
+        let sent = unsafe {
+            libc::sendmsg(wifi_fd.as_raw_fd(), &msg, 0)
+        };
+        
+        if sent < 0 {
+            return Err("Failed to send packet".into());
+        }
+        
+        Ok(sent as usize)
     }
 
-    Ok(file_descriptor)
 }

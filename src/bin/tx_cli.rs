@@ -10,27 +10,31 @@ use wfb_rs::common::Bandwidth;
 #[command(version, about, long_about = None)]
 struct Args {
     /// FEC k
-    #[arg(short, long, default_value_t = 8)]
+    #[arg(short='k', long, default_value_t = 8)]
     k: u32,
 
     /// FEC n
-    #[arg(short, long, default_value_t = 12)]
+    #[arg(short='n', long, default_value_t = 12)]
     n: u32,
 
     /// Sending Radio Port
-    #[arg(short, long, default_value_t = 0)]
-    radio_port: u16,
+    #[arg(short='p', long, default_value_t = 0)]
+    radio_port: u8,
 
     /// Data Input Port
-    #[arg(short, long, default_value_t = 5600)]
+    #[arg(short='u', long, default_value_t = 5600)]
     udp_port: u16,
 
     /// Receiving Buffer Size
-    #[arg(short, long, default_value_t = 1024)]
-    buffer_size: usize,
+    #[arg(short='R', long, default_value_t = 1024)]
+    buffer_size_recv: usize,
+
+    /// Sending Buffer Size
+    #[arg(short='s', long, default_value_t = 1024)]
+    buffer_size_send: usize,
 
     /// FEC delay
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short='F', long, default_value_t = 0)]
     fec_delay: u32,
 
     /// Bandwidth
@@ -42,23 +46,23 @@ struct Args {
     short_gi: bool,
 
     /// STBC
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(short='S', long, default_value_t = 1)]
     stbc: u8,
 
     /// LDPC
-    #[arg(short, long, default_value_t = true)]
+    #[arg(short='L', long, default_value_t = true)]
     ldpc: bool,
 
     /// MCS Index
-    #[arg(short, long, default_value_t = 9)]
+    #[arg(short='M', long, default_value_t = 9)]
     mcs_index: u8,
 
     /// vht nss
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(short='N', long, default_value_t = 1)]
     vht_nss: u8,
 
     /// Debug Port
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short='D', long, default_value_t = 0)]
     debug_port: u16,
 
     /// FEC Timeout
@@ -66,7 +70,7 @@ struct Args {
     fec_timeout: u64,
 
     /// Log Interval
-    #[arg(short='I', long, default_value = "1000", value_parser = parse_duration)]
+    #[arg(short='l', long, default_value = "1000", value_parser = parse_duration)]
     log_interval: Duration,
 
     /// Link ID
@@ -89,6 +93,10 @@ struct Args {
     #[arg(short, long, default_value_t = 9000)]
     control_port: u16,
 
+    /// Key File Location (unused, just here for compatibility)
+    #[arg(short='K', long)]
+    key_file: String,
+
     /// Wifi Devices
     wifi_device: String,
     // TODO args frametype, qdisc, fwmark, other modes?
@@ -107,7 +115,8 @@ fn main() {
     let mut tx = Transmitter::new(
         args.radio_port,
         args.link_id,
-        args.buffer_size,
+        args.buffer_size_recv,
+        args.buffer_size_send,
         args.log_interval,
         args.k,
         args.n,

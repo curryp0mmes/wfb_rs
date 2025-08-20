@@ -27,7 +27,7 @@ struct Args {
     radio_port: u16,
 
     /// Link ID
-    #[arg(short = 'l', long, default_value_t = 0)]
+    #[arg(short = 'i', long, default_value_t = 0)]
     link_id: u32,
 
     /// Receiving Buffer Size
@@ -35,7 +35,7 @@ struct Args {
     buffer_size: usize,
 
     /// Log Interval
-    #[arg(short='I', long, default_value = "1000", value_parser = parse_duration)]
+    #[arg(short='l', long, default_value = "1000", value_parser = parse_duration)]
     log_interval: Duration,
 
     /// Key File Location (unused)

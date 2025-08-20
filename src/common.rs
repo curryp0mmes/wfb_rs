@@ -33,14 +33,18 @@ pub static IEEE80211_HEADER: [u8; 24] = [
     0x00, 0x00, // (seq_num << 4) + fragment_num
 ];
 
-pub fn get_ieee80211_header(frame_type: u8, channel_id: u32, ieee_seq: u16) -> Vec<u8> {
-    let mut header = vec![];
-    header.extend_from_slice(&IEEE80211_HEADER);
-    header[0] = frame_type;
-    header[12..16].copy_from_slice(&channel_id.to_be_bytes());
-    header[18..22].copy_from_slice(&channel_id.to_be_bytes());
-    header[22..24].copy_from_slice(&ieee_seq.to_le_bytes()); // dont ask why, but this is the correct order
-    header
+pub fn get_ieee80211_header(frame_type: u8, channel_id: u32, ieee_seq: u16) -> [u8; 24] {
+    // Create IEEE 802.11 header (simplified)
+    let mut ieee_header: [u8; 24] = IEEE80211_HEADER; // Basic 802.11 header size
+    ieee_header[0] = frame_type; // Data frame
+    
+    ieee_header[12..16].copy_from_slice(&channel_id.to_be_bytes());
+    ieee_header[18..22].copy_from_slice(&channel_id.to_be_bytes());
+
+    // Set sequence number
+    ieee_header[22] = (ieee_seq & 0xff) as u8;
+    ieee_header[23] = ((ieee_seq >> 8) & 0xff) as u8;
+    ieee_header
 }
 
 pub fn get_radiotap_headers(

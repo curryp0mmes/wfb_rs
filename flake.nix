@@ -18,6 +18,7 @@
             clang
             llvmPackages.bintools
             rustup
+            libpcap
           ];
 
           RUSTC_VERSION = "stable";
