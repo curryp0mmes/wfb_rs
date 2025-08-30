@@ -54,7 +54,7 @@ struct Args {
     ldpc: bool,
 
     /// MCS Index
-    #[arg(short='M', long, default_value_t = 9)]
+    #[arg(short='M', long, default_value_t = 1)] //TODO why was the default 9?
     mcs_index: u8,
 
     /// vht nss
@@ -134,5 +134,5 @@ fn main() {
         args.wifi_device,
     );
 
-    let _ = tx.run();
+    let _ = tx.run().unwrap();
 }

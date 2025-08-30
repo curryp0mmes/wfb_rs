@@ -55,6 +55,8 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 fn main() {
     let args = Args::parse();
 
+    println!("{:?}", args);
+
     let _rx = Receiver::new(
         args.client_address,
         args.client_port,
@@ -65,5 +67,5 @@ fn main() {
         args.wifi_device,
     );
 
-    _rx.run();
+    let _ = _rx.run().unwrap();
 }

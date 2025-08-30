@@ -45,8 +45,16 @@ impl Receiver {
         let mut log_time = Instant::now() + self.log_interval;
         let mut received_packets_count = 0u64;
         let mut processed_packets_count = 0u64;
+        println!("Receiver ready!");
 
         loop {
+            let now = Instant::now();
+            if now >= log_time {
+                println!("Received {} packets, processed {}", received_packets_count, processed_packets_count);
+                received_packets_count = 0;
+                processed_packets_count = 0;
+                log_time = now + self.log_interval;
+            }
 
             match wifi_capture.next_packet() {
                 Ok(packet) if packet.len() > 0 => {
@@ -70,20 +78,13 @@ impl Receiver {
                 }
                 Err(pcap::Error::TimeoutExpired) => {
                     // Timeout is normal, continue
+
                     continue;
                 }
                 Err(e) => {
                     eprintln!("Error receiving packet: {}", e);
                     continue;
                 }
-            }
-
-            let now = Instant::now();
-            if now >= log_time {
-                println!("Received {} packets, processed {}", received_packets_count, processed_packets_count);
-                received_packets_count = 0;
-                processed_packets_count = 0;
-                log_time = now + self.log_interval;
             }
         }
     }
@@ -113,13 +114,12 @@ impl Receiver {
 
         let payload = &data[payload_start..];
         
+        //there are four bytes at the end where i dont know where it is coming from, so i remove them
+        //TODO figure out what that is
+        let payload = &payload[..payload.len().saturating_sub(4)];
+
         if payload.len() > self.buffer_size {
             return Ok(None); // Payload too large
-        }
-
-        // Basic validation - check if this looks like a WFB packet
-        if payload.len() < 10 {
-            return Ok(None); // Too short for WFB packet
         }
 
         Ok(Some(payload.to_vec()))
@@ -147,6 +147,8 @@ impl Receiver {
         // Set the BPF filter to match the original C++ code
         let filter = format!("ether[0x0a:2]==0x5742 && ether[0x0c:4] == {:#010x}", self.channel_id);
         cap.filter(&filter, true)?;
+
+        cap = cap.setnonblock()?;
 
         Ok(cap)
     }

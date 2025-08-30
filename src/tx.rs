@@ -77,6 +77,8 @@ impl Transmitter {
         let mut log_time = Instant::now() + self.log_interval;
         let mut sent_packets = 0u32;
         let mut sent_bytes = 0u64;
+        let mut received_packets = 0u32;
+
         loop {
             let timeout = log_time.saturating_duration_since(Instant::now());
             
@@ -97,9 +99,10 @@ impl Transmitter {
             
             // Handle timeout
             if timeout.is_zero() {
-                println!("Sent {} packets,\t\t {} bytes", sent_packets, sent_bytes);
+                println!("Received {} packets, sent {} packets,\t\t {} bytes", received_packets, sent_packets, sent_bytes);
                 sent_packets = 0;
                 sent_bytes = 0;
+                received_packets = 0;
                 log_time = Instant::now() + self.log_interval;
             }
             
@@ -119,9 +122,15 @@ impl Transmitter {
             }
 
             if received > 0 {
+                received_packets += 1;
                 let sent_size = self.send_packet(&wifi_file_descriptor, &buf[..received as usize])?;
                 sent_bytes += sent_size as u64;
                 sent_packets += 1;
+            } else if received < 0 {
+                let errno = unsafe { *libc::__errno_location() };
+                if errno != libc::EAGAIN && errno != libc::EWOULDBLOCK {
+                    eprintln!("recv error: errno {}", errno);
+                }
             }
         }
     }
@@ -175,8 +184,6 @@ impl Transmitter {
         if sockfd < 0 {
             return Err("Failed to create raw socket, you need root privileges to do so. Try again with sudo!".into());
         }
-
-        let fd = unsafe { OwnedFd::from_raw_fd(sockfd) };
         
         // Set PACKET_QDISC_BYPASS
         let bypass = 1i32;
@@ -198,7 +205,7 @@ impl Transmitter {
             return Err(format!("Interface {} not found", self.wifi_device).into());
         }
 
-        //Checck if wifi card is in monitor mode
+        //Check if wifi card is in monitor mode
         {
             let type_path = format!("/sys/class/net/{}/type", self.wifi_device);
             let type_content = fs::read_to_string(&type_path)
@@ -232,15 +239,18 @@ impl Transmitter {
         if bind_result < 0 {
             return Err("Failed to bind raw socket".into());
         }
+
+        let fd = unsafe { OwnedFd::from_raw_fd(sockfd) };
         
         Ok(fd)
     }
     
     fn send_packet(&mut self, wifi_fd: &OwnedFd, data: &[u8]) -> Result<usize, Box<dyn std::error::Error>> {
+        // Create IEEE 802.11 and radiotap headers
         let ieee_header = get_ieee80211_header(0x08, self.channel_id, self.ieee_sequence);
         self.ieee_sequence += 16;
         
-        // Create iovec for sendmsg
+        // Assemble payload from headers and data
         let iovecs = [
             libc::iovec {
                 iov_base: self.radiotap_header.as_ptr() as *mut libc::c_void,
@@ -271,10 +281,14 @@ impl Transmitter {
         };
         
         if sent < 0 {
-            return Err("Failed to send packet".into());
+            let errno = unsafe { *libc::__errno_location() };
+            if errno != libc::ENOBUFS {  // Ignore ENOBUFS
+                eprintln!("sendmsg failed: errno {}", errno);
+                return Err(format!("Failed to send packet: errno {}", errno).into());
+            }
+            return Ok(0);  // Treat ENOBUFS as non-fatal
         }
         
         Ok(sent as usize)
     }
-
 }
