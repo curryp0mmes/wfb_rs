@@ -37,7 +37,7 @@ pub fn get_ieee80211_header(frame_type: u8, channel_id: u32, ieee_seq: u16) -> [
     // Create IEEE 802.11 header (simplified)
     let mut ieee_header: [u8; 24] = IEEE80211_HEADER; // Basic 802.11 header size
     ieee_header[0] = frame_type; // Data frame
-    
+
     ieee_header[12..16].copy_from_slice(&channel_id.to_be_bytes());
     ieee_header[18..22].copy_from_slice(&channel_id.to_be_bytes());
 

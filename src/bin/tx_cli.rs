@@ -10,35 +10,35 @@ use wfb_rs::common::Bandwidth;
 #[command(version, about, long_about = None)]
 struct Args {
     /// frame type (unused)
-    #[arg(short='f', long, default_value = "data")]
+    #[arg(short = 'f', long, default_value = "data")]
     frame_type: String,
 
     /// FEC k
-    #[arg(short='k', long, default_value_t = 8)]
+    #[arg(short = 'k', long, default_value_t = 8)]
     k: u32,
 
     /// FEC n
-    #[arg(short='n', long, default_value_t = 12)]
+    #[arg(short = 'n', long, default_value_t = 12)]
     n: u32,
 
     /// Sending Radio Port
-    #[arg(short='p', long, default_value_t = 0)]
+    #[arg(short = 'p', long, default_value_t = 0)]
     radio_port: u8,
 
     /// Data Input Port
-    #[arg(short='u', long, default_value_t = 5600)]
+    #[arg(short = 'u', long, default_value_t = 5600)]
     udp_port: u16,
 
     /// Receiving Buffer Size
-    #[arg(short='R', long, default_value_t = 1024)]
+    #[arg(short = 'R', long, default_value_t = 1024)]
     buffer_size_recv: usize,
 
     /// Sending Buffer Size
-    #[arg(short='s', long, default_value_t = 1024)]
+    #[arg(short = 's', long, default_value_t = 1024)]
     buffer_size_send: usize,
 
     /// FEC delay
-    #[arg(short='F', long, default_value_t = 0)]
+    #[arg(short = 'F', long, default_value_t = 0)]
     fec_delay: u32,
 
     /// Bandwidth
@@ -50,23 +50,23 @@ struct Args {
     short_gi: String,
 
     /// STBC
-    #[arg(short='S', long, default_value_t = 1)]
+    #[arg(short = 'S', long, default_value_t = 1)]
     stbc: u8,
 
     /// LDPC
-    #[arg(short='L', long, default_value_t = 1)]
+    #[arg(short = 'L', long, default_value_t = 1)]
     ldpc: u8,
 
     /// MCS Index
-    #[arg(short='M', long, default_value_t = 1)] //TODO why was the default 9?
+    #[arg(short = 'M', long, default_value_t = 1)] //TODO why was the default 9?
     mcs_index: u8,
 
     /// vht nss
-    #[arg(short='N', long, default_value_t = 1)]
+    #[arg(short = 'N', long, default_value_t = 1)]
     vht_nss: u8,
 
     /// Debug Port
-    #[arg(short='D', long, default_value_t = 0)]
+    #[arg(short = 'D', long, default_value_t = 0)]
     debug_port: u16,
 
     /// FEC Timeout
@@ -98,7 +98,7 @@ struct Args {
     control_port: u16,
 
     /// Key File Location (unused, just here for compatibility)
-    #[arg(short='K', long, default_value = "")]
+    #[arg(short = 'K', long, default_value = "")]
     key_file: String,
 
     /// Wifi Devices
@@ -118,7 +118,7 @@ fn parse_bandwidth(arg: &str) -> Result<Bandwidth, String> {
         "40" => Ok(Bandwidth::Bw40),
         "80" => Ok(Bandwidth::Bw80),
         "160" => Ok(Bandwidth::Bw160),
-        _ => Err("Invalid Bandwidth!".to_string())
+        _ => Err("Invalid Bandwidth!".to_string()),
     }
 }
 

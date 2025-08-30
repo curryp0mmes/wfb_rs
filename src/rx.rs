@@ -36,10 +36,10 @@ impl Receiver {
 
     pub fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         let compound_output_address = format!("{}:{}", self.client_address, self.client_port);
-        
+
         let udp_socket = UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
         udp_socket.connect(&compound_output_address)?;
-        
+
         let mut wifi_capture = self.open_wifi_capture()?;
 
         let mut log_time = Instant::now() + self.log_interval;
@@ -50,7 +50,10 @@ impl Receiver {
         loop {
             let now = Instant::now();
             if now >= log_time {
-                println!("Received {} packets, processed {}", received_packets_count, processed_packets_count);
+                println!(
+                    "Received {} packets, processed {}",
+                    received_packets_count, processed_packets_count
+                );
                 received_packets_count = 0;
                 processed_packets_count = 0;
                 log_time = now + self.log_interval;
@@ -59,7 +62,7 @@ impl Receiver {
             match wifi_capture.next_packet() {
                 Ok(packet) if packet.len() > 0 => {
                     received_packets_count += 1;
-                    
+
                     if let Some(payload) = self.process_packet(&packet)? {
                         if let Err(e) = udp_socket.send(&payload) {
                             eprintln!("Error forwarding packet: {}", e);
@@ -89,7 +92,10 @@ impl Receiver {
         }
     }
 
-    fn process_packet(&self, packet: &Packet) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+    fn process_packet(
+        &self,
+        packet: &Packet,
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
         let data = packet.data;
 
         if data.len() < 4 {
@@ -107,13 +113,13 @@ impl Receiver {
 
         // Skip radiotap header and IEEE 802.11 header
         let payload_start = radiotap_len + common::IEEE80211_HEADER.len();
-        
+
         if data.len() <= payload_start {
             return Ok(None); // No payload
         }
 
         let payload = &data[payload_start..];
-        
+
         //there are four bytes at the end where i dont know where it is coming from, so i remove them
         //TODO figure out what that is
         let payload = &payload[..payload.len().saturating_sub(4)];
@@ -145,7 +151,10 @@ impl Receiver {
         }
 
         // Set the BPF filter to match the original C++ code
-        let filter = format!("ether[0x0a:2]==0x5742 && ether[0x0c:4] == {:#010x}", self.channel_id);
+        let filter = format!(
+            "ether[0x0a:2]==0x5742 && ether[0x0c:4] == {:#010x}",
+            self.channel_id
+        );
         cap.filter(&filter, true)?;
 
         cap = cap.setnonblock()?;
