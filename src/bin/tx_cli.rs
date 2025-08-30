@@ -9,6 +9,10 @@ use wfb_rs::common::Bandwidth;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// frame type (unused)
+    #[arg(short='f', long, default_value = "data")]
+    frame_type: String,
+
     /// FEC k
     #[arg(short='k', long, default_value_t = 8)]
     k: u32,
@@ -38,20 +42,20 @@ struct Args {
     fec_delay: u32,
 
     /// Bandwidth
-    #[arg(short='B', long, default_value = "bw20", value_parser = clap::value_parser!(Bandwidth))]
+    #[arg(short='B', long, default_value = "20", value_parser = parse_bandwidth)]
     bandwidth: Bandwidth,
 
     /// Short GI
-    #[arg(short = 'G', long, default_value_t = false)]
-    short_gi: bool,
+    #[arg(short = 'G', long, default_value = "short")]
+    short_gi: String,
 
     /// STBC
     #[arg(short='S', long, default_value_t = 1)]
     stbc: u8,
 
     /// LDPC
-    #[arg(short='L', long, default_value_t = true)]
-    ldpc: bool,
+    #[arg(short='L', long, default_value_t = 1)]
+    ldpc: u8,
 
     /// MCS Index
     #[arg(short='M', long, default_value_t = 1)] //TODO why was the default 9?
@@ -86,11 +90,11 @@ struct Args {
     mirror: bool,
 
     /// VHT Mode
-    #[arg(short = 't', long, default_value_t = false)]
+    #[arg(short = 'V', long, default_value_t = false)]
     vht_mode: bool,
 
     /// Control Port
-    #[arg(short, long, default_value_t = 9000)]
+    #[arg(short = 'C', long, default_value_t = 9000)]
     control_port: u16,
 
     /// Key File Location (unused, just here for compatibility)
@@ -105,6 +109,17 @@ struct Args {
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
     let milliseconds = arg.parse()?;
     Ok(std::time::Duration::from_millis(milliseconds))
+}
+
+fn parse_bandwidth(arg: &str) -> Result<Bandwidth, String> {
+    match arg {
+        "10" => Ok(Bandwidth::Bw10),
+        "20" => Ok(Bandwidth::Bw20),
+        "40" => Ok(Bandwidth::Bw40),
+        "80" => Ok(Bandwidth::Bw80),
+        "160" => Ok(Bandwidth::Bw160),
+        _ => Err("Invalid Bandwidth!".to_string())
+    }
 }
 
 fn main() {
@@ -123,9 +138,9 @@ fn main() {
         args.udp_port,
         args.fec_delay,
         args.bandwidth,
-        args.short_gi,
+        args.short_gi.to_lowercase().starts_with('s'),
         args.stbc,
-        args.ldpc,
+        args.ldpc > 0,
         args.mcs_index,
         args.vht_mode,
         args.vht_nss,

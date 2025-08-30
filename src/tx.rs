@@ -7,7 +7,7 @@ use std::ffi::CString;
 use crate::common::{self, get_ieee80211_header, Bandwidth};
 
 pub struct Transmitter {
-    _buffer_r: usize,
+    buffer_r: usize,
     _buffer_s: usize,
     log_interval: Duration,
     _k: u32,
@@ -52,7 +52,7 @@ impl Transmitter {
         let link_id = link_id & 0xffffff;
 
         Self {
-            _buffer_r: buffer_size_recv,
+            buffer_r: buffer_size_recv,
             _buffer_s: buffer_size_send,
             log_interval,
             _k: k,
@@ -111,7 +111,7 @@ impl Transmitter {
             }
             
             // Read UDP data
-            let mut buf = [0u8; 1500];
+            let mut buf = vec![0u8; self.buffer_r];
             let received = unsafe {
                 libc::recv(udp_file_descriptor.as_raw_fd(), buf.as_mut_ptr() as *mut libc::c_void, buf.len(), libc::MSG_DONTWAIT)
             };
@@ -122,6 +122,9 @@ impl Transmitter {
             }
 
             if received > 0 {
+                if received == self.buffer_r as isize {
+                    println!("Input packet seems too large");
+                }
                 received_packets += 1;
                 let sent_size = self.send_packet(&wifi_file_descriptor, &buf[..received as usize])?;
                 sent_bytes += sent_size as u64;
