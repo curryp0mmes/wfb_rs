@@ -43,31 +43,39 @@ impl Receiver {
         let mut wifi_capture = self.open_wifi_capture()?;
 
         let mut log_time = Instant::now() + self.log_interval;
-        let mut received_packets_count = 0u64;
-        let mut processed_packets_count = 0u64;
+        let mut received_packets = 0u64;
+        let mut received_bytes = 0u64;
+        let mut sent_packets = 0u64;
+        let mut sent_bytes = 0u64;
         println!("Receiver ready!");
 
         loop {
-            let now = Instant::now();
-            if now >= log_time {
+            if Instant::now() >= log_time {
                 println!(
-                    "Received {} packets, processed {}",
-                    received_packets_count, processed_packets_count
+                    "Packets R->T {}->{},\tBytes {}->{}",
+                    received_packets, sent_packets, received_bytes, sent_bytes
                 );
-                received_packets_count = 0;
-                processed_packets_count = 0;
-                log_time = now + self.log_interval;
+                received_packets = 0;
+                received_bytes = 0;
+                sent_packets = 0;
+                sent_bytes = 0;
+                log_time = log_time + self.log_interval;
             }
 
             match wifi_capture.next_packet() {
                 Ok(packet) if packet.len() > 0 => {
-                    received_packets_count += 1;
+                    received_packets += 1;
+                    received_bytes += packet.len() as u64;
 
                     if let Some(payload) = self.process_packet(&packet)? {
-                        if let Err(e) = udp_socket.send(&payload) {
-                            eprintln!("Error forwarding packet: {}", e);
-                        } else {
-                            processed_packets_count += 1;
+                        match udp_socket.send(&payload) {
+                            Err(e) => {
+                                eprintln!("Error forwarding packet: {}", e);
+                            }
+                            Ok(sent) => {
+                                sent_packets += 1;
+                                sent_bytes += sent as u64;
+                            }
                         }
                     }
                 }
@@ -92,6 +100,7 @@ impl Receiver {
         }
     }
 
+    // Reads and removes the radiotap and wifi headers
     fn process_packet(
         &self,
         packet: &Packet,

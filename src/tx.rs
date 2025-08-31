@@ -1,8 +1,9 @@
 use std::ffi::CString;
-use std::fs;
 use std::mem::{size_of, zeroed};
+use std::net::UdpSocket;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
+use std::{fs, io};
 
 use crate::common::{self, get_ieee80211_header, Bandwidth};
 
@@ -71,119 +72,68 @@ impl Transmitter {
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         println!("Binding {} to Port {}", self.wifi_device, self.udp_port);
 
-        let udp_file_descriptor = self.open_udp_socket().expect("Could not open udp port");
+        let compound_input_address = format!("0.0.0.0:{}", self.udp_port);
+        let input_udp_socket =
+            UdpSocket::bind(compound_input_address).expect("Could not open udp port");
+
         let wifi_file_descriptor = self.open_raw_socket().expect("Error opening wifi socket");
 
         let mut log_time = Instant::now() + self.log_interval;
         let mut sent_packets = 0u32;
         let mut sent_bytes = 0u64;
         let mut received_packets = 0u32;
+        let mut received_bytes = 0u64;
+
+        let mut buf = vec![0u8; self.buffer_r];
 
         loop {
             let timeout = log_time.saturating_duration_since(Instant::now());
 
-            // Poll UDP socket
-            let mut poll_fd = libc::pollfd {
-                fd: udp_file_descriptor.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-
-            let poll_result = unsafe { libc::poll(&mut poll_fd, 1, timeout.as_millis() as i32) };
-
-            if poll_result < 0 {
-                return Err("Poll error".into());
-            }
-
-            // Handle timeout
-            if timeout.is_zero() {
+            // Log data if timeout has passed
+            if timeout.is_zero() && !self.log_interval.is_zero() {
                 println!(
-                    "Received {} packets, sent {} packets,\t\t {} bytes",
-                    received_packets, sent_packets, sent_bytes
+                    "Packets R->T {}->{},\t\tBytes: {}->{}",
+                    received_packets, sent_packets, received_bytes, sent_bytes
                 );
                 sent_packets = 0;
                 sent_bytes = 0;
                 received_packets = 0;
-                log_time = Instant::now() + self.log_interval;
-            }
-
-            if poll_result == 0 {
-                continue; // Timeout, no data
-            }
-
-            // Read UDP data
-            let mut buf = vec![0u8; self.buffer_r];
-            let received = unsafe {
-                libc::recv(
-                    udp_file_descriptor.as_raw_fd(),
-                    buf.as_mut_ptr() as *mut libc::c_void,
-                    buf.len(),
-                    libc::MSG_DONTWAIT,
-                )
-            };
-
-            if received == 0 {
-                //TODO reset fec
+                received_bytes = 0;
+                log_time = log_time + self.log_interval;
                 continue;
             }
 
-            if received > 0 {
-                if received == self.buffer_r as isize {
-                    println!("Input packet seems too large");
-                }
-                received_packets += 1;
-                let sent_size =
-                    self.send_packet(&wifi_file_descriptor, &buf[..received as usize])?;
-                sent_bytes += sent_size as u64;
-                sent_packets += 1;
-            } else if received < 0 {
-                let errno = unsafe { *libc::__errno_location() };
-                if errno != libc::EAGAIN && errno != libc::EWOULDBLOCK {
-                    eprintln!("recv error: errno {}", errno);
+            if !self.log_interval.is_zero() {
+                input_udp_socket.set_read_timeout(Some(timeout))?;
+            }
+
+            let poll_result = input_udp_socket.recv_from(&mut buf);
+
+            match poll_result {
+                Err(err) => match err.kind() {
+                    io::ErrorKind::WouldBlock => continue,
+                    io::ErrorKind::TimedOut => continue,
+                    io::ErrorKind::Deadlock => continue,
+                    _ => panic!("Error polling udp input: {}", err),
+                },
+                Ok((received, _origin)) => {
+                    if received == 0 {
+                        //Empty packet, //TODO reset fec
+                        continue;
+                    }
+
+                    if received == self.buffer_r {
+                        println!("Input packet seems too large");
+                    }
+                    received_packets += 1;
+                    received_bytes += received as u64;
+                    let sent_size =
+                        self.send_packet(&wifi_file_descriptor, &buf[..received as usize])?;
+                    sent_bytes += sent_size as u64;
+                    sent_packets += 1;
                 }
             }
         }
-    }
-
-    fn open_udp_socket(&self) -> Result<OwnedFd, Box<dyn std::error::Error>> {
-        let sockfd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
-        if sockfd < 0 {
-            return Err("Failed to create UDP socket".into());
-        }
-
-        let fd = unsafe { OwnedFd::from_raw_fd(sockfd) };
-
-        // Set socket options
-        let reuse_addr = 1i32;
-        unsafe {
-            libc::setsockopt(
-                sockfd,
-                libc::SOL_SOCKET,
-                libc::SO_REUSEADDR,
-                &reuse_addr as *const _ as *const libc::c_void,
-                size_of::<i32>() as u32,
-            );
-        }
-
-        // Bind socket
-        let mut addr: libc::sockaddr_in = unsafe { zeroed() };
-        addr.sin_family = libc::AF_INET as u16;
-        addr.sin_port = (self.udp_port).to_be();
-        addr.sin_addr.s_addr = libc::INADDR_ANY;
-
-        let bind_result = unsafe {
-            libc::bind(
-                sockfd,
-                &addr as *const _ as *const libc::sockaddr,
-                size_of::<libc::sockaddr_in>() as u32,
-            )
-        };
-
-        if bind_result < 0 {
-            return Err("Failed to bind UDP socket".into());
-        }
-
-        Ok(fd)
     }
 
     fn open_raw_socket(&self) -> Result<OwnedFd, Box<dyn std::error::Error>> {
