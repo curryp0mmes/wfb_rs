@@ -1,28 +1,42 @@
+use raptorq::Encoder;
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::mem::{size_of, zeroed};
 use std::net::UdpSocket;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use std::{fs, io};
 
+use crate::common::get_fec_oti;
 use crate::common::{self, get_ieee80211_header, Bandwidth};
+use crate::common::{FecHeader, FEC_HEADER_SIZE};
 
 pub struct Transmitter {
     buffer_r: usize,
     _buffer_s: usize,
     log_interval: Duration,
-    _k: u32,
-    _n: u32,
     udp_port: u16,
-    _fec_delay: u32,
     _debug_port: u16,
-    _fec_timeout: u64,
     wifi_device: String,
 
     //private fields
     radiotap_header: Vec<u8>,
     ieee_sequence: u16,
     channel_id: u32,
+    buf: Vec<u8>,
+    input_udp_socket: UdpSocket,
+    block_id: u32,
+    send_buffer: HashMap<u32, Vec<Vec<u8>>>,
+
+    _encoder_cache: Option<Encoder>,
+    _fec_packet_buffer: Vec<Vec<u8>>,
+    _k: u32,
+    _n: u32,
+    _fec_delay: u32,
+    _fec_timeout: u64,
+    fec_enabled: bool,
+
+    time_benchmark: Instant,
 }
 
 impl Transmitter {
@@ -32,10 +46,7 @@ impl Transmitter {
         buffer_size_recv: usize,
         buffer_size_send: usize,
         log_interval: Duration,
-        k: u32,
-        n: u32,
         udp_port: u16,
-        fec_delay: u32,
         bandwidth: Bandwidth,
         short_gi: bool,
         stbc: u8,
@@ -44,8 +55,12 @@ impl Transmitter {
         vht_mode: bool,
         vht_nss: u8,
         debug_port: u16,
-        fec_timeout: u64,
         wifi_device: String,
+        k: u32,
+        n: u32,
+        fec_delay: u32,
+        fec_timeout: u64,
+        fec_enabled: bool,
     ) -> Self {
         let radiotap_header = common::get_radiotap_headers(
             stbc, ldpc, short_gi, bandwidth, mcs_index, vht_mode, vht_nss,
@@ -56,25 +71,35 @@ impl Transmitter {
             buffer_r: buffer_size_recv,
             _buffer_s: buffer_size_send,
             log_interval,
-            _k: k,
-            _n: n,
             udp_port,
-            _fec_delay: fec_delay,
             _debug_port: debug_port,
-            _fec_timeout: fec_timeout,
             wifi_device,
+
             radiotap_header,
             ieee_sequence: 0,
             channel_id: (link_id << 8) + (radio_port as u32),
+            buf: vec![0u8; buffer_size_recv],
+            input_udp_socket: UdpSocket::bind(format!("0.0.0.0:{}", udp_port))
+                .expect("Could not open udp port"),
+            send_buffer: HashMap::new(),
+            block_id: 0,
+
+            _k: k,
+            _n: n,
+            _fec_delay: fec_delay,
+            _fec_timeout: fec_timeout,
+            fec_enabled,
+            _encoder_cache: None,
+            _fec_packet_buffer: Vec::new(),
+
+            time_benchmark: Instant::now(),
         }
     }
 
     pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         println!("Binding {} to Port {}", self.wifi_device, self.udp_port);
 
-        let compound_input_address = format!("0.0.0.0:{}", self.udp_port);
-        let input_udp_socket =
-            UdpSocket::bind(compound_input_address).expect("Could not open udp port");
+        self.input_udp_socket.set_nonblocking(true)?;
 
         let wifi_file_descriptor = self.open_raw_socket().expect("Error opening wifi socket");
 
@@ -83,8 +108,6 @@ impl Transmitter {
         let mut sent_bytes = 0u64;
         let mut received_packets = 0u32;
         let mut received_bytes = 0u64;
-
-        let mut buf = vec![0u8; self.buffer_r];
 
         loop {
             let timeout = log_time.saturating_duration_since(Instant::now());
@@ -103,35 +126,98 @@ impl Transmitter {
                 continue;
             }
 
-            if !self.log_interval.is_zero() {
-                input_udp_socket.set_read_timeout(Some(timeout))?;
+            self.poll_incoming();
+
+            // Collect packets to send to avoid double mutable borrow
+            let mut packets_to_send = Vec::new();
+            let mut remove_ids = Vec::new();
+            for (id, block) in &mut self.send_buffer {
+                match block.pop() {
+                    Some(data) => {
+                        packets_to_send.push((id.clone(), data));
+                        block.truncate(2);
+                    }
+                    None => {
+                        remove_ids.push(*id);
+                    }
+                }
+            }
+            for (_id, data) in packets_to_send {
+                let sent_size = self.send_packet(&wifi_file_descriptor, &data)?;
+                sent_bytes += sent_size as u64;
+                sent_packets += 1;
+                self.poll_incoming();
+            }
+            for id in remove_ids {
+                self.send_buffer.remove(&id);
             }
 
-            let poll_result = input_udp_socket.recv_from(&mut buf);
+            //println!("Wifi Done \t{} ns",self.time_benchmark.elapsed().as_nanos());
+        }
+    }
 
-            match poll_result {
-                Err(err) => match err.kind() {
-                    io::ErrorKind::WouldBlock => continue,
-                    io::ErrorKind::TimedOut => continue,
-                    io::ErrorKind::Deadlock => continue,
-                    _ => panic!("Error polling udp input: {}", err),
-                },
-                Ok((received, _origin)) => {
-                    if received == 0 {
-                        //Empty packet, //TODO reset fec
-                        continue;
-                    }
+    fn poll_incoming(&mut self) {
+        self.time_benchmark = Instant::now();
+        let poll_result = self.input_udp_socket.recv_from(&mut self.buf);
 
-                    if received == self.buffer_r {
-                        println!("Input packet seems too large");
-                    }
-                    received_packets += 1;
-                    received_bytes += received as u64;
-                    let sent_size =
-                        self.send_packet(&wifi_file_descriptor, &buf[..received as usize])?;
-                    sent_bytes += sent_size as u64;
-                    sent_packets += 1;
+        match poll_result {
+            Err(err) => match err.kind() {
+                io::ErrorKind::WouldBlock => return,
+                io::ErrorKind::TimedOut => return,
+                io::ErrorKind::Deadlock => return,
+                _ => panic!("Error polling udp input: {}", err),
+            },
+            Ok((received, _origin)) => {
+                if received == 0 {
+                    //Empty packet, //TODO reset fec
+                    return;
                 }
+
+                if received == self.buffer_r {
+                    println!("Input packet seems too large");
+                }
+                //received_packets += 1;
+                //received_bytes += received as u64;
+
+                //println!("\nPolling {} b \t{} ns", received, self.time_benchmark.elapsed().as_nanos());
+
+                let block = if self.fec_enabled {
+                    // Optimized FEC: Generate fewer repair packets and batch operations
+                    let encoder = Encoder::new(&self.buf[..received as usize], get_fec_oti());
+
+                    // Generate minimal repair packets for maximum performance
+                    let repair_packets = 1; // Minimal repair for best performance
+                    let encoded_packets = encoder.get_encoded_packets(repair_packets);
+
+                    //println!("Encoding \t{} ns", self.time_benchmark.elapsed().as_nanos());
+
+                    // Pre-allocate combined buffer to avoid repeated allocations
+
+                    let mut block: Vec<Vec<u8>> = Vec::new();
+                    for (packet_id, packet) in encoded_packets.iter().enumerate() {
+                        let fec_header =
+                            FecHeader::new(self.block_id, packet_id as u32, received as u32);
+                        let fec_header_bytes = fec_header.to_bytes();
+                        let serialized_packet = packet.serialize();
+
+                        // Create combined payload
+                        let mut combined_payload =
+                            Vec::with_capacity(FEC_HEADER_SIZE + serialized_packet.len());
+                        combined_payload.extend_from_slice(&fec_header_bytes);
+                        combined_payload.extend_from_slice(&serialized_packet);
+
+                        block.push(combined_payload);
+                    }
+                    block
+                } else {
+                    //else wrap the raw udp stream into another vector of length one (only gets sent once)
+                    vec![Vec::from(&self.buf[..received as usize])]
+                };
+
+                self.block_id = self.block_id.wrapping_add(1);
+                self.send_buffer.insert(self.block_id, block);
+
+                //println!("Writing blocks \t{} ns", self.time_benchmark.elapsed().as_nanos());
             }
         }
     }

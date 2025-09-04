@@ -13,6 +13,10 @@ struct Args {
     #[arg(short = 'f', long, default_value = "data")]
     frame_type: String,
 
+    /// FEC Enabled
+    #[arg(short = 'e', long, default_value_t = true)]
+    fec_enabled: bool,
+
     /// FEC k
     #[arg(short = 'k', long, default_value_t = 8)]
     k: u32,
@@ -133,10 +137,7 @@ fn main() {
         args.buffer_size_recv,
         args.buffer_size_send,
         args.log_interval,
-        args.k,
-        args.n,
         args.udp_port,
-        args.fec_delay,
         args.bandwidth,
         args.short_gi.to_lowercase().starts_with('s'),
         args.stbc,
@@ -145,8 +146,12 @@ fn main() {
         args.vht_mode,
         args.vht_nss,
         args.debug_port,
-        args.fec_timeout,
         args.wifi_device,
+        args.k,
+        args.n,
+        args.fec_delay,
+        args.fec_timeout,
+        args.fec_enabled,
     );
 
     let _ = tx.run().unwrap();

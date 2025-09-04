@@ -1,9 +1,12 @@
 use pcap::{self, Active, Capture, Packet};
 use radiotap::Radiotap;
+use raptorq::{Decoder, EncodingPacket};
+use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
 
 use crate::common;
+use crate::common::{FecHeader, FEC_HEADER_SIZE};
 
 pub struct Receiver {
     client_address: String,
@@ -12,6 +15,11 @@ pub struct Receiver {
     log_interval: Duration,
     wifi_device: String,
     channel_id: u32,
+
+    fec_decoders: HashMap<u32, Decoder>,
+    fec_packets: HashMap<u32, Vec<Vec<u8>>>,
+    decoded_blocks: std::collections::HashSet<u32>, // Track already decoded blocks
+    original_lengths: HashMap<u32, u32>,            // Track original data length per block
 }
 
 impl Receiver {
@@ -31,10 +39,15 @@ impl Receiver {
             log_interval,
             wifi_device,
             channel_id: link_id << 8 + radio_port,
+
+            fec_decoders: HashMap::new(),
+            fec_packets: HashMap::new(),
+            decoded_blocks: std::collections::HashSet::new(),
+            original_lengths: HashMap::new(),
         }
     }
 
-    pub fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let compound_output_address = format!("{}:{}", self.client_address, self.client_port);
 
         let udp_socket = UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
@@ -68,13 +81,29 @@ impl Receiver {
                     received_bytes += packet.len() as u64;
 
                     if let Some(payload) = self.process_packet(&packet)? {
-                        match udp_socket.send(&payload) {
-                            Err(e) => {
-                                eprintln!("Error forwarding packet: {}", e);
+                        if FecHeader::is_fec(&payload) {
+                            // Try to parse FEC header
+                            if let Some(decoded_data) = self.process_fec_packet(&payload)? {
+                                match udp_socket.send(&decoded_data) {
+                                    Err(e) => {
+                                        eprintln!("Error forwarding packet: {}", e);
+                                    }
+                                    Ok(sent) => {
+                                        sent_packets += 1;
+                                        sent_bytes += sent as u64;
+                                    }
+                                }
                             }
-                            Ok(sent) => {
-                                sent_packets += 1;
-                                sent_bytes += sent as u64;
+                        } else {
+                            // Forward packet directly without FEC processing
+                            match udp_socket.send(&payload) {
+                                Err(e) => {
+                                    eprintln!("Error forwarding packet: {}", e);
+                                }
+                                Ok(sent) => {
+                                    sent_packets += 1;
+                                    sent_bytes += sent as u64;
+                                }
                             }
                         }
                     }
@@ -97,6 +126,86 @@ impl Receiver {
                     continue;
                 }
             }
+        }
+    }
+
+    fn process_fec_packet(
+        &mut self,
+        payload: &[u8],
+    ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+        // Check if payload has FEC header
+        if payload.len() < FEC_HEADER_SIZE {
+            // Not a FEC packet, forward as-is
+            return Ok(Some(payload.to_vec()));
+        }
+
+        // Try to parse FEC header
+        if let Some(fec_header) = FecHeader::from_bytes(payload) {
+            // Check if we've already successfully decoded this block
+            if self.decoded_blocks.contains(&fec_header.block_id) {
+                // Already decoded this block, ignore this packet
+                return Ok(None);
+            }
+
+            // This is a FEC packet
+            let fec_packet_data = &payload[FEC_HEADER_SIZE..];
+
+            // Get or create decoder for this block
+            if !self.fec_decoders.contains_key(&fec_header.block_id) {
+                // Create ObjectTransmissionInformation with proper parameters
+                // (transfer_length, symbol_size, sub_symbol_size, source_symbols, repair_symbols)
+
+                use crate::common::get_fec_oti;
+                let oti = get_fec_oti();
+                self.fec_decoders
+                    .insert(fec_header.block_id, Decoder::new(oti));
+                self.fec_packets.insert(fec_header.block_id, Vec::new());
+                // Store the original length from the first packet of this block
+                self.original_lengths
+                    .insert(fec_header.block_id, fec_header.original_length);
+            }
+
+            let decoder = self.fec_decoders.get_mut(&fec_header.block_id).unwrap();
+            let packets = self.fec_packets.get_mut(&fec_header.block_id).unwrap();
+
+            // Store the packet
+            packets.push(fec_packet_data.to_vec());
+
+            // Try to decode with current packets
+            let encoding_packet = EncodingPacket::deserialize(fec_packet_data);
+            if let Some(decoded_data) = decoder.decode(encoding_packet) {
+                // Successfully decoded! Get the original length and trim the data
+                let original_length = self
+                    .original_lengths
+                    .get(&fec_header.block_id)
+                    .copied()
+                    .unwrap_or(decoded_data.len() as u32);
+                let trimmed_data = decoded_data
+                    [..original_length.min(decoded_data.len() as u32) as usize]
+                    .to_vec();
+
+                // Clean up
+                self.decoded_blocks.insert(fec_header.block_id);
+                self.fec_decoders.remove(&fec_header.block_id);
+                self.fec_packets.remove(&fec_header.block_id);
+                self.original_lengths.remove(&fec_header.block_id);
+
+                return Ok(Some(trimmed_data));
+            }
+
+            // Clean up old decoders to prevent memory leak
+            // Remove decoders older than current block_id - 10
+            let cleanup_threshold = fec_header.block_id.saturating_sub(10);
+            self.fec_decoders.retain(|&k, _| k > cleanup_threshold);
+            self.fec_packets.retain(|&k, _| k > cleanup_threshold);
+            self.original_lengths.retain(|&k, _| k > cleanup_threshold);
+            // Also clean up decoded blocks tracker
+            self.decoded_blocks.retain(|&k| k > cleanup_threshold);
+
+            return Ok(None); // Need more packets
+        } else {
+            // Not a FEC packet - transmit as is
+            return Ok(Some(payload.to_vec()));
         }
     }
 

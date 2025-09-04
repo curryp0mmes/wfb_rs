@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::time::Duration;
+#[cfg(feature = "receiver")]
 use wfb_rs::Receiver;
 
 /// Receiving side of wfb_rs
@@ -52,12 +53,13 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
     Ok(std::time::Duration::from_millis(milliseconds))
 }
 
+#[cfg(feature = "receiver")]
 fn main() {
     let args = Args::parse();
 
     println!("{:?}", args);
 
-    let _rx = Receiver::new(
+    let mut _rx = Receiver::new(
         args.client_address,
         args.client_port,
         args.radio_port,
