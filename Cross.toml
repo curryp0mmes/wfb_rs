@@ -2,7 +2,10 @@
 default-target = "aarch64-unknown-linux-gnu"
 
 [target.aarch64-unknown-linux-gnu]
-dockerfile = "cross/aarch64-unknown-linux-gnu.Dockerfile"
+dockerfile = "cross/aarch64.Dockerfile"
+
+[target.armv7-unknown-linux-gnueabihf]
+dockerfile = "cross/armv7.Dockerfile"
 
 
 [build.env]

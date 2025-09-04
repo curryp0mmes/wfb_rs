@@ -71,3 +71,8 @@ fn main() {
 
     let _ = _rx.run().unwrap();
 }
+
+#[cfg(not(feature = "receiver"))]
+fn main() {
+    println!("Receiver was not built, recompile with --features=receiver")
+}
