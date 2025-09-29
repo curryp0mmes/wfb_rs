@@ -164,7 +164,6 @@ impl Transmitter {
             Err(err) => match err.kind() {
                 io::ErrorKind::WouldBlock => return,
                 io::ErrorKind::TimedOut => return,
-                io::ErrorKind::Deadlock => return,
                 _ => panic!("Error polling udp input: {}", err),
             },
             Ok((received, _origin)) => {
