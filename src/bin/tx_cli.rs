@@ -14,7 +14,7 @@ struct Args {
     frame_type: String,
 
     /// FEC Enabled
-    #[arg(short = 'e', long, default_value_t = true)]
+    #[arg(short = 'e', long, default_value_t = false)]
     fec_enabled: bool,
 
     /// FEC k
@@ -34,11 +34,11 @@ struct Args {
     udp_port: u16,
 
     /// Receiving Buffer Size
-    #[arg(short = 'R', long, default_value_t = 1024)]
+    #[arg(short = 'R', long, default_value_t = 8192)]
     buffer_size_recv: usize,
 
     /// Sending Buffer Size
-    #[arg(short = 's', long, default_value_t = 1024)]
+    #[arg(short = 's', long, default_value_t = 8192)]
     buffer_size_send: usize,
 
     /// FEC delay

@@ -40,7 +40,7 @@ struct Args {
     log_interval: Duration,
 
     /// Key File Location (unused)
-    #[arg(short = 'K', long)]
+    #[arg(short = 'K', long, default_value = "")]
     key_file: String,
 
     /// Wifi Device
