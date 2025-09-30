@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clap::Parser;
-use wfb_rs::Transmitter;
+use wfb_rs::{common, Transmitter};
 
 use wfb_rs::common::Bandwidth;
 
@@ -82,7 +82,7 @@ struct Args {
     log_interval: Duration,
 
     /// Link ID
-    #[arg(short = 'i', long, default_value_t = 0)]
+    #[arg(short = 'i', long, default_value_t = 7669206)]
     link_id: u32,
 
     /// Epoch
@@ -100,6 +100,10 @@ struct Args {
     /// Control Port
     #[arg(short = 'C', long, default_value_t = 9000)]
     control_port: u16,
+
+    /// Wifi Card setup (channel 149, monitor mode)
+    #[arg(long, default_value_t = false)]
+    wifi_setup: bool,
 
     /// Key File Location (unused, just here for compatibility)
     #[arg(short = 'K', long, default_value = "")]
@@ -130,6 +134,10 @@ fn main() {
     let args = Args::parse();
 
     println!("{:?}", args);
+
+    if args.wifi_setup {
+        let _ = common::set_monitor_mode(args.wifi_device.as_str()).unwrap();
+    }
 
     let mut tx = Transmitter::new(
         args.radio_port,

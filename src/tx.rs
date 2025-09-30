@@ -126,7 +126,7 @@ impl Transmitter {
                 continue;
             }
 
-            self.poll_incoming();
+            self.poll_incoming(&mut received_packets, &mut received_bytes);
 
             // Collect packets to send to avoid double mutable borrow
             let mut packets_to_send = Vec::new();
@@ -146,7 +146,7 @@ impl Transmitter {
                 let sent_size = self.send_packet(&wifi_file_descriptor, &data)?;
                 sent_bytes += sent_size as u64;
                 sent_packets += 1;
-                self.poll_incoming();
+                self.poll_incoming(&mut received_packets, &mut received_bytes);
             }
             for id in remove_ids {
                 self.send_buffer.remove(&id);
@@ -156,7 +156,7 @@ impl Transmitter {
         }
     }
 
-    fn poll_incoming(&mut self) {
+    fn poll_incoming(&mut self, received_packets: &mut u32, received_bytes: &mut u64) {
         self.time_benchmark = Instant::now();
         let poll_result = self.input_udp_socket.recv_from(&mut self.buf);
 
@@ -175,8 +175,8 @@ impl Transmitter {
                 if received == self.buffer_r {
                     println!("Input packet seems too large");
                 }
-                //received_packets += 1;
-                //received_bytes += received as u64;
+                *received_packets += 1;
+                *received_bytes += received as u64;
 
                 //println!("\nPolling {} b \t{} ns", received, self.time_benchmark.elapsed().as_nanos());
 

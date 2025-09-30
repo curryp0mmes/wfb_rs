@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::time::Duration;
+use wfb_rs::common;
 #[cfg(feature = "receiver")]
 use wfb_rs::Receiver;
 
@@ -28,7 +29,7 @@ struct Args {
     radio_port: u16,
 
     /// Link ID
-    #[arg(short = 'i', long, default_value_t = 0)]
+    #[arg(short = 'i', long, default_value_t = 7669206)]
     link_id: u32,
 
     /// Receiving Buffer Size
@@ -38,6 +39,10 @@ struct Args {
     /// Log Interval
     #[arg(short='l', long, default_value = "1000", value_parser = parse_duration)]
     log_interval: Duration,
+
+    /// Wifi Card setup (channel 149, monitor mode)
+    #[arg(long, default_value_t = false)]
+    wifi_setup: bool,
 
     /// Key File Location (unused)
     #[arg(short = 'K', long, default_value = "")]
@@ -58,6 +63,10 @@ fn main() {
     let args = Args::parse();
 
     println!("{:?}", args);
+
+    if args.wifi_setup {
+        common::set_monitor_mode(args.wifi_device.as_str()).unwrap();
+    }
 
     let mut _rx = Receiver::new(
         args.client_address,

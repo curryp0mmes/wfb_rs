@@ -1,3 +1,5 @@
+use std::process::Command;
+
 use clap::ValueEnum;
 use raptorq::ObjectTransmissionInformation;
 
@@ -203,4 +205,27 @@ impl ToString for Bandwidth {
             Bandwidth::Bw160 => "160".to_string(),
         }
     }
+}
+
+
+// This function sets up wifi drivers for sending data via monitor mode. It is designed for OpenIPC Cameras and requires iw
+pub fn set_monitor_mode(interface_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if let Err(_) = Command::new("modprobe").arg("8812eu").output() {
+        //Pass, driver must not be set
+    }
+
+    Command::new("ip")
+        .args(["link", "set", interface_name, "down"])
+        .output()?;
+    Command::new("iw")
+        .args(["dev", interface_name, "set", "monitor", "otherbss"])
+        .output()
+        .expect("Could not find iw command, can't set monitor mode");
+    Command::new("ip")
+        .args(["link", "set", interface_name, "up"])
+        .output()?;
+    Command::new("iw")
+        .args(["dev", interface_name, "set", "channel", "149"])
+        .output()?;
+    Ok(())
 }
