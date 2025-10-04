@@ -22,6 +22,7 @@
           nativeBuildInputs = [ pkgs.pkg-config ];
           buildInputs = with pkgs; [
             clang
+            cargo-cross
             llvmPackages.bintools
             rustup
             libpcap

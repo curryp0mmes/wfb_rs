@@ -1,4 +1,5 @@
 pub mod common;
+mod fec;
 #[cfg(feature = "receiver")]
 mod rx;
 mod tx;

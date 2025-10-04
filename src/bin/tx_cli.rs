@@ -9,21 +9,9 @@ use wfb_rs::common::Bandwidth;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// frame type (unused)
-    #[arg(short = 'f', long, default_value = "data")]
-    frame_type: String,
-
-    /// FEC Enabled
-    #[arg(short = 'e', long, default_value_t = false)]
-    fec_enabled: bool,
-
-    /// FEC k
-    #[arg(short = 'k', long, default_value_t = 8)]
-    k: u32,
-
-    /// FEC n
-    #[arg(short = 'n', long, default_value_t = 12)]
-    n: u32,
+    /// Explicitly disable fec
+    #[arg(short = 'f', long, default_value_t = false)]
+    fec_disabled: bool,
 
     /// Sending Radio Port
     #[arg(short = 'p', long, default_value_t = 0)]
@@ -34,19 +22,23 @@ struct Args {
     udp_port: u16,
 
     /// Receiving Buffer Size
-    #[arg(short = 'R', long, default_value_t = 8192)]
-    buffer_size_recv: usize,
+    #[arg(short = 'R', long, default_value_t = 5_000)]
+    buffer_size: usize,
 
-    /// Sending Buffer Size
-    #[arg(short = 's', long, default_value_t = 8192)]
-    buffer_size_send: usize,
+    // (max) Size of each package send over wifi (needs to match with rx)
+    #[arg(short = 'W', long, default_value_t = 800)]
+    wifi_packet_size: u16,
 
-    /// FEC delay
-    #[arg(short = 'F', long, default_value_t = 0)]
-    fec_delay: u32,
+    // (min) Size of each fec block
+    #[arg(short = 'B', long, default_value_t = 10_000)]
+    block_size: u16,
+
+    // Number of redundant packages send per block
+    #[arg(short = 'r', long, default_value_t = 15)]
+    redundant_pkgs: u32,
 
     /// Bandwidth
-    #[arg(short='B', long, default_value = "20", value_parser = parse_bandwidth)]
+    #[arg(short='b', long, default_value = "20", value_parser = parse_bandwidth)]
     bandwidth: Bandwidth,
 
     /// Short GI
@@ -69,14 +61,6 @@ struct Args {
     #[arg(short = 'N', long, default_value_t = 1)]
     vht_nss: u8,
 
-    /// Debug Port
-    #[arg(short = 'D', long, default_value_t = 0)]
-    debug_port: u16,
-
-    /// FEC Timeout
-    #[arg(short = 'T', long, default_value_t = 1000)]
-    fec_timeout: u64,
-
     /// Log Interval
     #[arg(short='l', long, default_value = "1000", value_parser = parse_duration)]
     log_interval: Duration,
@@ -86,7 +70,7 @@ struct Args {
     link_id: u32,
 
     /// Epoch
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0)]
     epoch: u64,
 
     /// Mirror mode
@@ -94,7 +78,7 @@ struct Args {
     mirror: bool,
 
     /// VHT Mode
-    #[arg(short = 'V', long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     vht_mode: bool,
 
     /// Control Port
@@ -102,7 +86,7 @@ struct Args {
     control_port: u16,
 
     /// Wifi Card setup (channel 149, monitor mode)
-    #[arg(long, default_value_t = false)]
+    #[arg(short = 's', long, default_value_t = false)]
     wifi_setup: bool,
 
     /// Key File Location (unused, just here for compatibility)
@@ -142,8 +126,7 @@ fn main() {
     let mut tx = Transmitter::new(
         args.radio_port,
         args.link_id,
-        args.buffer_size_recv,
-        args.buffer_size_send,
+        args.buffer_size,
         args.log_interval,
         args.udp_port,
         args.bandwidth,
@@ -153,13 +136,11 @@ fn main() {
         args.mcs_index,
         args.vht_mode,
         args.vht_nss,
-        args.debug_port,
         args.wifi_device,
-        args.k,
-        args.n,
-        args.fec_delay,
-        args.fec_timeout,
-        args.fec_enabled,
+        args.fec_disabled,
+        args.block_size,
+        args.wifi_packet_size,
+        args.redundant_pkgs,
     );
 
     let _ = tx.run().unwrap();

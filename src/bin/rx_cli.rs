@@ -8,14 +8,6 @@ use wfb_rs::Receiver;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// FEC k
-    #[arg(short, default_value_t = 8)]
-    k: u32,
-
-    /// FEC n
-    #[arg(short, default_value_t = 12)]
-    n: u32,
-
     /// Forwarding Address
     #[arg(short = 'c', long, default_value = "127.0.0.1")]
     client_address: String,
@@ -35,6 +27,10 @@ struct Args {
     /// Receiving Buffer Size
     #[arg(short = 'R', long, default_value_t = 0)]
     buffer_size: usize,
+
+    // (max) Size of each package send over wifi (needs to match with tx)
+    #[arg(short = 'W', long, default_value_t = 800)]
+    wifi_packet_size: u16,
 
     /// Log Interval
     #[arg(short='l', long, default_value = "1000", value_parser = parse_duration)]
@@ -76,6 +72,7 @@ fn main() {
         args.buffer_size,
         args.log_interval,
         args.wifi_device,
+        args.wifi_packet_size,
     );
 
     let _ = _rx.run().unwrap();
