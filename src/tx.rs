@@ -107,7 +107,11 @@ impl Transmitter {
 
             if let Some(block) = self.poll_incoming(&mut received_packets, &mut received_bytes) {
                 for packet in block {
-                    sent_bytes += self.send_packet(&wifi_file_descriptor, &packet)? as u64;
+                    let send = self.send_packet(&wifi_file_descriptor, &packet)? as u64;
+                    if send < packet.len() as u64 {
+                        eprintln!("socket dropped some bytes");
+                    }
+                    sent_bytes += send;
                     sent_packets += 1;
                 }
             }

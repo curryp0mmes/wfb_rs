@@ -35,6 +35,7 @@ impl FecHeader {
         bytes
     }
 
+    #[cfg(feature = "receiver")]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() < FEC_HEADER_SIZE {
             return None;

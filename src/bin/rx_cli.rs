@@ -25,7 +25,7 @@ struct Args {
     link_id: u32,
 
     /// Receiving Buffer Size
-    #[arg(short = 'R', long, default_value_t = 0)]
+    #[arg(short = 'R', long, default_value_t = 5_000)]
     buffer_size: usize,
 
     // (max) Size of each package send over wifi (needs to match with tx)

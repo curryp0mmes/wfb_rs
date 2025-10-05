@@ -111,11 +111,11 @@ impl Receiver {
                 }
                 Ok(_packet) => {
                     //TODO reset fec (?)
+                    eprintln!("packet len <= 0");
                     continue;
                 }
                 Err(pcap::Error::TimeoutExpired) => {
                     // Timeout is normal, continue
-
                     continue;
                 }
                 Err(e) => {
@@ -179,11 +179,17 @@ impl Receiver {
 
         // Clean up old decoders to prevent memory leak
         // Remove decoders older than current block_id - 100
-        let cleanup_limit = 100;
-        let cleanup_threshold = fec_header.block_id.wrapping_sub(cleanup_limit);
-        self.fec_decoders.retain(|&k, _| k > cleanup_threshold || k < fec_header.block_id);
+        let cleanup_limit = 64;
+        let cleanup_threshold_high = fec_header.block_id.wrapping_add(cleanup_limit);
+        let cleanup_threshold_low = fec_header.block_id.wrapping_sub(cleanup_limit);
+        let condition: Box<dyn Fn(u8) -> bool> = if cleanup_threshold_high > cleanup_threshold_low {
+            Box::new(|a| cleanup_threshold_low < a && a < cleanup_threshold_high)
+        } else {
+            Box::new(|a| cleanup_threshold_low < a || a < cleanup_threshold_high)
+        };
+        self.fec_decoders.retain(|&k, _| condition(k));
         // Also clean up decoded blocks tracker
-        self.decoded_blocks.retain(|&k| k > cleanup_threshold || k < fec_header.block_id);
+        self.decoded_blocks.retain(|&k| condition(k));
 
         return None; // Need more packets
     }
@@ -196,6 +202,7 @@ impl Receiver {
         let data = packet.data;
 
         if data.len() < 4 {
+            eprintln!("packet too short");
             return Ok(None); // Too short for radiotap header
         }
 
@@ -212,6 +219,7 @@ impl Receiver {
         let payload_start = radiotap_len + common::IEEE80211_HEADER.len();
 
         if data.len() <= payload_start {
+            eprintln!("packet has no payload");
             return Ok(None); // No payload
         }
 
@@ -222,6 +230,7 @@ impl Receiver {
         let payload = &payload[..payload.len().saturating_sub(4)];
 
         if payload.len() > self.buffer_size {
+            eprintln!("payload too large / buffer size too small");
             return Ok(None); // Payload too large
         }
 
