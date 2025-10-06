@@ -50,8 +50,8 @@ struct Args {
     stbc: u8,
 
     /// LDPC
-    #[arg(short = 'L', long, default_value_t = 1)]
-    ldpc: u8,
+    #[arg(short = 'L', long, default_value_t = true)]
+    ldpc: bool,
 
     /// MCS Index
     #[arg(short = 'M', long, default_value_t = 1)] //TODO why was the default 9?
@@ -73,10 +73,6 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     epoch: u64,
 
-    /// Mirror mode
-    #[arg(short = 'm', long, default_value_t = false)]
-    mirror: bool,
-
     /// VHT Mode
     #[arg(long, default_value_t = false)]
     vht_mode: bool,
@@ -88,10 +84,6 @@ struct Args {
     /// Wifi Card setup (channel 149, monitor mode)
     #[arg(short = 's', long, default_value_t = false)]
     wifi_setup: bool,
-
-    /// Key File Location (unused, just here for compatibility)
-    #[arg(short = 'K', long, default_value = "")]
-    key_file: String,
 
     /// Wifi Devices
     wifi_device: String,
@@ -132,7 +124,7 @@ fn main() {
         args.bandwidth,
         args.short_gi.to_lowercase().starts_with('s'),
         args.stbc,
-        args.ldpc > 0,
+        args.ldpc,
         args.mcs_index,
         args.vht_mode,
         args.vht_nss,

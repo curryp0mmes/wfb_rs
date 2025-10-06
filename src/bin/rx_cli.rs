@@ -40,13 +40,8 @@ struct Args {
     #[arg(long, default_value_t = false)]
     wifi_setup: bool,
 
-    /// Key File Location (unused)
-    #[arg(short = 'K', long, default_value = "")]
-    key_file: String,
-
     /// Wifi Device
     wifi_device: String,
-    // TODO add args other modes?
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
