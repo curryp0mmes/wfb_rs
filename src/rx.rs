@@ -86,7 +86,7 @@ impl Receiver {
                         received_bytes += packet.len() as u64;
 
                         if let Some(payload) = self.process_packet(&packet)? {
-                            if let Some(fec_header) = FecHeader::from_bytes(&payload[..FEC_HEADER_SIZE]) {
+                            if let Some(fec_header) = FecHeader::from_bytes(&payload) {
                                 if let Some(decoded_data) = self.process_fec_packet(fec_header, &payload[FEC_HEADER_SIZE..]) {
                                     for udp_pkg in decoded_data {
                                         match udp_socket.send(&udp_pkg) {
