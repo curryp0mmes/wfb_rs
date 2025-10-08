@@ -26,6 +26,7 @@
             llvmPackages.bintools
             rustup
             libpcap
+            iw
           ];
 
           RUSTC_VERSION = "stable";

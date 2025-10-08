@@ -14,7 +14,7 @@ pub struct Receiver {
     client_port: u16,
     buffer_size: usize,
     log_interval: Duration,
-    wifi_device: String,
+    wifi_devices: Vec<String>,
     channel_id: u32,
 
     fec_decoders: HashMap<u8, Decoder>,
@@ -30,7 +30,7 @@ impl Receiver {
         link_id: u32,
         buffer_size: usize,
         log_interval: Duration,
-        wifi_device: String,
+        wifi_devices: Vec<String>,
         wifi_packet_size: u16,
     ) -> Self {
         Self {
@@ -38,7 +38,7 @@ impl Receiver {
             client_port,
             buffer_size,
             log_interval,
-            wifi_device,
+            wifi_devices,
             channel_id: link_id << 8 | radio_port as u32,
 
             fec_decoders: HashMap::new(),
@@ -53,7 +53,11 @@ impl Receiver {
         let udp_socket = UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
         udp_socket.connect(&compound_output_address)?;
 
-        let mut wifi_capture = self.open_wifi_capture()?;
+        let mut wifi_captures: Vec<Capture<Active>> = self
+            .wifi_devices
+            .iter()
+            .map(|dev| self.open_wifi_capture(dev.clone()))
+            .collect::<Result<_, _>>()?;
 
         let mut log_time = Instant::now() + self.log_interval;
         let mut received_packets = 0u64;
@@ -75,52 +79,54 @@ impl Receiver {
                 log_time = log_time + self.log_interval;
             }
 
-            match wifi_capture.next_packet() {
-                Ok(packet) if packet.len() > 0 => {
-                    received_packets += 1;
-                    received_bytes += packet.len() as u64;
+            for wifi_capture in &mut wifi_captures {
+                match wifi_capture.next_packet() {
+                    Ok(packet) if packet.len() > 0 => {
+                        received_packets += 1;
+                        received_bytes += packet.len() as u64;
 
-                    if let Some(payload) = self.process_packet(&packet)? {
-                        if let Some(fec_header) = FecHeader::from_bytes(&payload[..FEC_HEADER_SIZE]) {
-                            if let Some(decoded_data) = self.process_fec_packet(fec_header, &payload[FEC_HEADER_SIZE..]) {
-                                for udp_pkg in decoded_data {
-                                    match udp_socket.send(&udp_pkg) {
-                                        Err(e) => {
-                                            eprintln!("Error forwarding packet: {}", e);
-                                        }
-                                        Ok(sent) => {
-                                            sent_packets += 1;
-                                            sent_bytes += sent as u64;
+                        if let Some(payload) = self.process_packet(&packet)? {
+                            if let Some(fec_header) = FecHeader::from_bytes(&payload[..FEC_HEADER_SIZE]) {
+                                if let Some(decoded_data) = self.process_fec_packet(fec_header, &payload[FEC_HEADER_SIZE..]) {
+                                    for udp_pkg in decoded_data {
+                                        match udp_socket.send(&udp_pkg) {
+                                            Err(e) => {
+                                                eprintln!("Error forwarding packet: {}", e);
+                                            }
+                                            Ok(sent) => {
+                                                sent_packets += 1;
+                                                sent_bytes += sent as u64;
+                                            }
                                         }
                                     }
                                 }
-                            }
-                        } else {
-                            // Forward packet directly without FEC processing
-                            match udp_socket.send(&payload) {
-                                Err(e) => {
-                                    eprintln!("Error forwarding packet: {}", e);
-                                }
-                                Ok(sent) => {
-                                    sent_packets += 1;
-                                    sent_bytes += sent as u64;
+                            } else {
+                                // Forward packet directly without FEC processing
+                                match udp_socket.send(&payload) {
+                                    Err(e) => {
+                                        eprintln!("Error forwarding packet: {}", e);
+                                    }
+                                    Ok(sent) => {
+                                        sent_packets += 1;
+                                        sent_bytes += sent as u64;
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                Ok(_packet) => {
-                    //TODO reset fec (?)
-                    eprintln!("packet len <= 0");
-                    continue;
-                }
-                Err(pcap::Error::TimeoutExpired) => {
-                    // Timeout is normal, continue
-                    continue;
-                }
-                Err(e) => {
-                    eprintln!("Error receiving packet: {}", e);
-                    continue;
+                    Ok(_packet) => {
+                        //TODO reset fec (?)
+                        eprintln!("packet len <= 0");
+                        continue;
+                    }
+                    Err(pcap::Error::TimeoutExpired) => {
+                        // Timeout is normal, continue
+                        continue;
+                    }
+                    Err(e) => {
+                        eprintln!("Error receiving packet: {}", e);
+                        continue;
+                    }
                 }
             }
         }
@@ -237,13 +243,13 @@ impl Receiver {
         Ok(Some(payload.to_vec()))
     }
 
-    fn open_wifi_capture(&self) -> Result<Capture<Active>, Box<dyn std::error::Error>> {
+    fn open_wifi_capture(&self, wifi_device: String) -> Result<Capture<Active>, Box<dyn std::error::Error>> {
         let wifi_max_size = 4096;
 
         let wifi_card = pcap::Device::list()?
             .into_iter()
-            .find(|dev| dev.name == self.wifi_device)
-            .ok_or_else(|| format!("WiFi device {} not found", self.wifi_device))?;
+            .find(|dev| dev.name == wifi_device)
+            .ok_or_else(|| format!("WiFi device {} not found", wifi_device))?;
 
         let mut cap = pcap::Capture::from_device(wifi_card)?
             .snaplen(wifi_max_size)
@@ -253,7 +259,7 @@ impl Receiver {
             .open()?;
 
         if cap.get_datalink() != pcap::Linktype::IEEE802_11_RADIOTAP {
-            return Err(format!("Unknown encapsulation on interface {}", self.wifi_device).into());
+            return Err(format!("Unknown encapsulation on interface {}", wifi_device).into());
         }
 
         // Set the BPF filter to match the original C++ code

@@ -41,7 +41,8 @@ struct Args {
     wifi_setup: bool,
 
     /// Wifi Device
-    wifi_device: String,
+    #[arg(required = true, num_args = 1..)]
+    wifi_devices: Vec<String>
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
@@ -56,7 +57,9 @@ fn main() {
     println!("{:?}", args);
 
     if args.wifi_setup {
-        common::set_monitor_mode(args.wifi_device.as_str()).unwrap();
+        for wifi in &args.wifi_devices {
+            common::set_monitor_mode(wifi.as_str()).unwrap();
+        }
     }
 
     let mut _rx = Receiver::new(
@@ -66,7 +69,7 @@ fn main() {
         args.link_id,
         args.buffer_size,
         args.log_interval,
-        args.wifi_device,
+        args.wifi_devices,
         args.wifi_packet_size,
     );
 
