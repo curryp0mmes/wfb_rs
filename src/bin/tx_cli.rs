@@ -85,6 +85,10 @@ struct Args {
     #[arg(short = 's', long, default_value_t = false)]
     wifi_setup: bool,
 
+    /// Tx Power Index (0-64)
+    #[arg(short = 't', long)]
+    txpower: Option<u8>,
+
     /// Wifi Devices
     wifi_device: String,
     // TODO args frametype, qdisc, fwmark, other modes?
@@ -113,6 +117,9 @@ fn main() {
 
     if args.wifi_setup {
         let _ = common::set_monitor_mode(args.wifi_device.as_str()).unwrap();
+    }
+    if let Some(tx_power) = args.txpower {
+        let _ = common::set_tx_power(args.wifi_device.as_str(), tx_power).unwrap();
     }
 
     let mut tx = Transmitter::new(

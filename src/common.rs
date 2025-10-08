@@ -161,3 +161,10 @@ pub fn set_monitor_mode(interface_name: &str) -> Result<(), Box<dyn std::error::
         .output()?;
     Ok(())
 }
+
+pub fn set_tx_power(interface_name: &str, tx_power: u8) -> Result<(), Box<dyn std::error::Error>> {
+    Command::new("iw")
+        .args(["dev", interface_name, "set", "txpower", "fixed", format!("{}", tx_power as u16 * 50).as_str()])
+        .output()?;
+    Ok(())
+}
