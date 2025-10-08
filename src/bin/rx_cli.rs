@@ -37,7 +37,7 @@ struct Args {
     log_interval: Duration,
 
     /// Wifi Card setup (channel 149, monitor mode)
-    #[arg(long, default_value_t = false)]
+    #[arg(short='s', long, default_value_t = false)]
     wifi_setup: bool,
 
     /// Wifi Device
