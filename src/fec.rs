@@ -30,12 +30,12 @@ impl FecHeader {
     }
 
     pub fn to_bytes(&self) -> [u8; FEC_HEADER_SIZE] {
-        let mut bytes = Vec::with_capacity(FEC_HEADER_SIZE);
-        bytes.extend_from_slice(&self.magic.to_le_bytes());
-        bytes.extend_from_slice(&self.block_id.to_le_bytes());
-        bytes.extend_from_slice(&self.block_size.to_le_bytes());
-        bytes.extend_from_slice(&self.packet_size.to_le_bytes());
-        bytes.try_into().unwrap()
+        let mut bytes = [0u8; FEC_HEADER_SIZE];
+        bytes[0..4].copy_from_slice(&self.magic.to_le_bytes());
+        bytes[4..5].copy_from_slice(&self.block_id.to_le_bytes());
+        bytes[5..7].copy_from_slice(&self.block_size.to_le_bytes());
+        bytes[7..9].copy_from_slice(&self.packet_size.to_le_bytes());
+        bytes
     }
 
     #[cfg(feature = "receiver")]
