@@ -28,10 +28,6 @@ struct Args {
     #[arg(short = 'R', long, default_value_t = 5_000)]
     buffer_size: usize,
 
-    // (max) Size of each package send over wifi (needs to match with tx)
-    #[arg(short = 'W', long, default_value_t = 800)]
-    wifi_packet_size: u16,
-
     /// Log Interval
     #[arg(short='l', long, default_value = "1000", value_parser = parse_duration)]
     log_interval: Duration,
@@ -70,7 +66,6 @@ fn main() {
         args.buffer_size,
         args.log_interval,
         args.wifi_devices,
-        args.wifi_packet_size,
     );
 
     let _ = _rx.run().unwrap();

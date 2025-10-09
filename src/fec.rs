@@ -14,25 +14,28 @@ pub struct FecHeader {
     pub magic: u32,         // 4 bytes - magic number to identify FEC packets
     pub block_id: u8,       // 1 byte - identifies which data block this belongs to
     pub block_size: u16,    // 2 bytes - the total size of the current fec block in bytes
+    pub packet_size: u16,    // 2 bytes - the size of the wifi packet in bytes
 }
 
 impl FecHeader {
     pub const MAGIC: u32 = 0x46454332; // "FEC2" in ASCII
 
-    pub fn new(block_id: u8, block_size: u16) -> Self {
+    pub fn new(block_id: u8, block_size: u16, packet_size: u16) -> Self {
         Self {
             magic: Self::MAGIC,
             block_id,
             block_size,
+            packet_size,
         }
     }
 
     pub fn to_bytes(&self) -> [u8; FEC_HEADER_SIZE] {
-        let mut bytes = [0u8; FEC_HEADER_SIZE];
-        bytes[0..4].copy_from_slice(&self.magic.to_le_bytes());
-        bytes[4..5].copy_from_slice(&self.block_id.to_le_bytes());
-        bytes[5..7].copy_from_slice(&self.block_size.to_le_bytes());
-        bytes
+        let mut bytes = Vec::with_capacity(FEC_HEADER_SIZE);
+        bytes.extend_from_slice(&self.magic.to_le_bytes());
+        bytes.extend_from_slice(&self.block_id.to_le_bytes());
+        bytes.extend_from_slice(&self.block_size.to_le_bytes());
+        bytes.extend_from_slice(&self.packet_size.to_le_bytes());
+        bytes.try_into().unwrap()
     }
 
     #[cfg(feature = "receiver")]
@@ -48,11 +51,13 @@ impl FecHeader {
 
         let block_id = bytes[4];
         let block_size = u16::from_le_bytes(bytes[5..7].try_into().unwrap());
+        let packet_size = u16::from_le_bytes(bytes[7..9].try_into().unwrap());
 
         Some(Self {
             magic,
             block_id,
-            block_size
+            block_size,
+            packet_size
         })
     }
 }

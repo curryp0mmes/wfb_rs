@@ -19,7 +19,6 @@ pub struct Receiver {
 
     fec_decoders: HashMap<u8, Decoder>,
     decoded_blocks: HashSet<u8>,
-    wifi_packet_size: u16,
 }
 
 impl Receiver {
@@ -31,7 +30,6 @@ impl Receiver {
         buffer_size: usize,
         log_interval: Duration,
         wifi_devices: Vec<String>,
-        wifi_packet_size: u16,
     ) -> Self {
         Self {
             client_address,
@@ -43,7 +41,6 @@ impl Receiver {
 
             fec_decoders: HashMap::new(),
             decoded_blocks: HashSet::new(),
-            wifi_packet_size,
         }
     }
 
@@ -82,10 +79,9 @@ impl Receiver {
             for wifi_capture in &mut wifi_captures {
                 match wifi_capture.next_packet() {
                     Ok(packet) if packet.len() > 0 => {
-                        received_packets += 1;
-                        received_bytes += packet.len() as u64;
-
                         if let Some(payload) = self.process_packet(&packet)? {
+                            received_packets += 1;
+                            received_bytes += payload.len() as u64;
                             if let Some(fec_header) = FecHeader::from_bytes(&payload) {
                                 if let Some(decoded_data) = self.process_fec_packet(fec_header, &payload[FEC_HEADER_SIZE..]) {
                                     for udp_pkg in decoded_data {
@@ -112,6 +108,8 @@ impl Receiver {
                                     }
                                 }
                             }
+                        } else {
+                            eprintln!("could not decode packet");
                         }
                     }
                     Ok(_packet) => {
@@ -149,7 +147,7 @@ impl Receiver {
             // Create ObjectTransmissionInformation with proper parameters
             // (transfer_length, symbol_size, sub_symbol_size, source_symbols, repair_symbols)
 
-            let oti = get_raptorq_oti(fec_header.block_size, self.wifi_packet_size);
+            let oti = get_raptorq_oti(fec_header.block_size, fec_header.packet_size);
             self.fec_decoders
                 .insert(fec_header.block_id, Decoder::new(oti));
         }

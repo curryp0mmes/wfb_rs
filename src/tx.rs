@@ -172,7 +172,7 @@ impl Transmitter {
                     let oci = get_raptorq_oti(block_size, self.wifi_packet_size);
                     let encoder = Encoder::new(&self.block_buffer, oci);
 
-                    let header = FecHeader::new(self.block_id, block_size).to_bytes();
+                    let header = FecHeader::new(self.block_id, block_size, self.wifi_packet_size).to_bytes();
                     encoder.get_encoded_packets(self.redundant_pkgs)
                         .iter()
                         .map(|p| [&header, &p.serialize()[..]].concat())
@@ -304,6 +304,8 @@ impl Transmitter {
             return Ok(0); // Treat ENOBUFS as non-fatal
         }
 
-        Ok(sent as usize)
+        let header_len = self.radiotap_header.len() + ieee_header.len();
+
+        Ok((sent as usize).saturating_sub(header_len))
     }
 }
