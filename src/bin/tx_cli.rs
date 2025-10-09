@@ -42,8 +42,8 @@ struct Args {
     bandwidth: Bandwidth,
 
     /// Short GI
-    #[arg(short = 'G', long, default_value = "short")]
-    short_gi: String,
+    #[arg(short = 'G', long, action=clap::ArgAction::SetFalse, default_value_t = true)]
+    short_gi: bool,
 
     /// STBC
     #[arg(short = 'S', long, default_value_t = 1)]
@@ -122,14 +122,13 @@ fn main() {
         let _ = common::set_tx_power(args.wifi_device.as_str(), tx_power).unwrap();
     }
 
-    let mut tx = Transmitter::new(
+    let tx = Transmitter::new(
         args.radio_port,
         args.link_id,
         args.buffer_size,
-        args.log_interval,
         args.udp_port,
         args.bandwidth,
-        args.short_gi.to_lowercase().starts_with('s'),
+        args.short_gi,
         args.stbc,
         args.ldpc,
         args.mcs_index,
@@ -139,8 +138,8 @@ fn main() {
         args.fec_disabled,
         args.block_size,
         args.wifi_packet_size,
-        args.redundant_pkgs,
-    );
+        args.redundant_pkgs
+    ).unwrap();
 
-    let _ = tx.run().unwrap();
+    let _ = tx.run(args.log_interval).unwrap();
 }

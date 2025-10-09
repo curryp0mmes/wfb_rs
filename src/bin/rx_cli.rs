@@ -64,11 +64,10 @@ fn main() {
         args.radio_port,
         args.link_id,
         args.buffer_size,
-        args.log_interval,
         args.wifi_devices,
-    );
+    ).unwrap();
 
-    let _ = _rx.run().unwrap();
+    let _ = _rx.run(args.log_interval).unwrap();
 }
 
 #[cfg(not(feature = "receiver"))]

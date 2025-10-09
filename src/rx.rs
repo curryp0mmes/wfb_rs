@@ -1,7 +1,8 @@
-use pcap::{self, Active, Capture, Packet};
+use pcap::{self, Active, Capture};
 use radiotap::Radiotap;
 use raptorq::{Decoder, EncodingPacket};
 use std::collections::{HashMap, HashSet};
+use std::mem::size_of;
 use std::iter::once;
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
@@ -10,12 +11,10 @@ use super::fec::{get_raptorq_oti, FecHeader, FEC_HEADER_SIZE};
 use super::common;
 
 pub struct Receiver {
-    client_address: String,
-    client_port: u16,
+    udp_socket: UdpSocket,
+
+    wifi_captures: Vec<Capture<Active>>,
     buffer_size: usize,
-    log_interval: Duration,
-    wifi_devices: Vec<String>,
-    channel_id: u32,
 
     fec_decoders: HashMap<u8, Decoder>,
     decoded_blocks: HashSet<u8>,
@@ -28,35 +27,33 @@ impl Receiver {
         radio_port: u16,
         link_id: u32,
         buffer_size: usize,
-        log_interval: Duration,
         wifi_devices: Vec<String>,
-    ) -> Self {
-        Self {
-            client_address,
-            client_port,
-            buffer_size,
-            log_interval,
-            wifi_devices,
-            channel_id: link_id << 8 | radio_port as u32,
-
-            fec_decoders: HashMap::new(),
-            decoded_blocks: HashSet::new(),
-        }
-    }
-
-    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let compound_output_address = format!("{}:{}", self.client_address, self.client_port);
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let compound_output_address = format!("{}:{}", client_address, client_port);
 
         let udp_socket = UdpSocket::bind("0.0.0.0:0")?; // Bind to any available port
         udp_socket.connect(&compound_output_address)?;
 
-        let mut wifi_captures: Vec<Capture<Active>> = self
-            .wifi_devices
-            .iter()
-            .map(|dev| self.open_wifi_capture(dev.clone()))
+        let channel_id = link_id << 8 | radio_port as u32;
+
+        let wifi_captures: Vec<Capture<Active>> = wifi_devices
+            .into_iter()
+            .map(|dev| Self::open_wifi_capture(dev, channel_id))
             .collect::<Result<_, _>>()?;
 
-        let mut log_time = Instant::now() + self.log_interval;
+        Ok(Self {
+            udp_socket,
+            buffer_size,
+            wifi_captures,
+
+            fec_decoders: HashMap::new(),
+            decoded_blocks: HashSet::new(),
+        })
+    }
+
+    pub fn run(mut self, log_interval: Duration) -> Result<(), Box<dyn std::error::Error>> {
+        
+        let mut log_time = Instant::now() + log_interval;
         let mut received_packets = 0u64;
         let mut received_bytes = 0u64;
         let mut sent_packets = 0u64;
@@ -73,19 +70,21 @@ impl Receiver {
                 received_bytes = 0;
                 sent_packets = 0;
                 sent_bytes = 0;
-                log_time = log_time + self.log_interval;
+                log_time = log_time + log_interval;
             }
 
-            for wifi_capture in &mut wifi_captures {
+            for i in 0..self.wifi_captures.len() {
+                let wifi_capture = &mut self.wifi_captures[i];
                 match wifi_capture.next_packet() {
                     Ok(packet) if packet.len() > 0 => {
+                        let packet = packet.data.to_vec();
                         if let Some(payload) = self.process_packet(&packet)? {
                             received_packets += 1;
                             received_bytes += payload.len() as u64;
                             if let Some(fec_header) = FecHeader::from_bytes(&payload) {
                                 if let Some(decoded_data) = self.process_fec_packet(fec_header, &payload[FEC_HEADER_SIZE..]) {
                                     for udp_pkg in decoded_data {
-                                        match udp_socket.send(&udp_pkg) {
+                                        match self.udp_socket.send(&udp_pkg) {
                                             Err(e) => {
                                                 eprintln!("Error forwarding packet: {}", e);
                                             }
@@ -98,7 +97,7 @@ impl Receiver {
                                 }
                             } else {
                                 // Forward packet directly without FEC processing
-                                match udp_socket.send(&payload) {
+                                match self.udp_socket.send(&payload) {
                                     Err(e) => {
                                         eprintln!("Error forwarding packet: {}", e);
                                     }
@@ -161,10 +160,10 @@ impl Receiver {
         if let Some(mut decoded_data) = decoder.decode(packet) {
             // Successfully decoded! Get the original udp packages:
             let Some(num_pkgs) = decoded_data.pop() else { return None};
-            if decoded_data.len() < num_pkgs as usize * 2 { return None };
-            let indices_start_index = decoded_data.len() - num_pkgs as usize * 2;
+            if decoded_data.len() < num_pkgs as usize * size_of::<u16>() { return None };
+            let indices_start_index = decoded_data.len() - num_pkgs as usize * size_of::<u16>();
             let pkg_indices: Vec<_> = decoded_data[indices_start_index..]
-                .chunks(2)
+                .chunks(size_of::<u16>())
                 .map(|b| u16::from_le_bytes(b.try_into().unwrap()))
                 .chain(once(indices_start_index as u16))
                 .collect();
@@ -201,20 +200,19 @@ impl Receiver {
     // Reads and removes the radiotap and wifi headers
     fn process_packet(
         &self,
-        packet: &Packet,
+        packet: &[u8],
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-        let data = packet.data;
 
-        if data.len() < 4 {
+        if packet.len() < 4 {
             eprintln!("packet too short");
             return Ok(None); // Too short for radiotap header
         }
 
         // Parse minimal radiotap header to get length
-        let radiotap_len = u16::from_le_bytes([data[2], data[3]]) as usize;
+        let radiotap_len = u16::from_le_bytes([packet[2], packet[3]]) as usize;
 
         //Parse the whole radiotap header via library
-        let _radiotap_header = Radiotap::from_bytes(data)?;
+        let _radiotap_header = Radiotap::from_bytes(packet)?;
 
         //println!("Received header: {:?}", radiotap_header);
         //let header_len = radiotap_header.header.size;
@@ -222,12 +220,12 @@ impl Receiver {
         // Skip radiotap header and IEEE 802.11 header
         let payload_start = radiotap_len + common::IEEE80211_HEADER.len();
 
-        if data.len() <= payload_start {
+        if packet.len() <= payload_start {
             eprintln!("packet has no payload");
             return Ok(None); // No payload
         }
 
-        let payload = &data[payload_start..];
+        let payload = &packet[payload_start..];
 
         //there are four bytes at the end where i dont know where it is coming from, so i remove them
         //TODO figure out what that is
@@ -241,7 +239,7 @@ impl Receiver {
         Ok(Some(payload.to_vec()))
     }
 
-    fn open_wifi_capture(&self, wifi_device: String) -> Result<Capture<Active>, Box<dyn std::error::Error>> {
+    fn open_wifi_capture(wifi_device: String, channel_id: u32) -> Result<Capture<Active>, Box<dyn std::error::Error>> {
         let wifi_max_size = 4096;
 
         let wifi_card = pcap::Device::list()?
@@ -263,7 +261,7 @@ impl Receiver {
         // Set the BPF filter to match the original C++ code
         let filter = format!(
             "ether[0x0a:2]==0x5742 && ether[0x0c:4] == {:#010x}",
-            self.channel_id
+            channel_id
         );
         cap.filter(&filter, true)?;
 
