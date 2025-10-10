@@ -15,13 +15,21 @@ pub struct Transmitter {
     udp_socket: UdpSocket,
     buffer_r: usize,
 
+    fec_disabled: bool,
+
+    tx: TX,
+    fec: TXFec,
+}
+
+struct TX {
     wifi_socket: OwnedFd,
     radiotap_header: Vec<u8>,
     ieee_sequence: u16,
     channel_id: u32,
+}
 
+struct TXFec {
     block_id: u8,
-    fec_disabled: bool,
     pkg_indices: Vec<u16>,
     block_buffer: Vec<u8>,
     min_block_size: u16,
@@ -55,25 +63,33 @@ impl Transmitter {
 
         println!("Binding {} to Port {}", wifi_device, udp_port);
 
-        let wifi_socket = Self::open_raw_socket(wifi_device)?;
+        let wifi_socket = TX::open_raw_socket(wifi_device)?;
         let udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", udp_port))?;
 
-        Ok(Self {
-            buffer_r: buffer_size_recv,
+        let tx = TX {
             wifi_socket,
-
             radiotap_header,
             ieee_sequence: 0,
             channel_id: (link_id << 8) | (radio_port as u32),
-            udp_socket,
-            block_id: 0,
 
-            fec_disabled,
+        };
+
+        let fec = TXFec {
+            block_id: 0,
             pkg_indices: Vec::new(),
             block_buffer: Vec::new(),
             min_block_size,
             wifi_packet_size,
             redundant_pkgs
+        };
+
+        Ok(Self {
+            buffer_r: buffer_size_recv,
+            udp_socket,
+
+            fec_disabled,
+            tx,
+            fec
         })
     }
 
@@ -86,18 +102,36 @@ impl Transmitter {
 
         // start logtask
         thread::spawn(move || {
-            println!(
-                "Packets R->T {}->{},\tBytes {}->{}",
-                received_packets_r.try_iter().sum::<u32>(),
-                sent_packets_r.try_iter().sum::<u32>(),
-                received_bytes_r.try_iter().sum::<u32>(),
-                sent_bytes_r.try_iter().sum::<u32>()
-            );
-            thread::sleep(log_interval);
+            loop {
+                println!(
+                    "Packets R->T {}->{},\tBytes {}->{}",
+                    received_packets_r.try_iter().sum::<u32>(),
+                    sent_packets_r.try_iter().sum::<u32>(),
+                    received_bytes_r.try_iter().sum::<u32>(),
+                    sent_bytes_r.try_iter().sum::<u32>()
+                );
+                thread::sleep(log_interval);
+            }
+        });
+
+        let (block_s, block_r) = channel::<Vec<Vec<u8>>>();
+        
+        let mut tx = self.tx;
+
+        thread::spawn(move || {
+            for block in block_r.into_iter() {
+                for packet in block.into_iter() {
+                    let sent = tx.send_packet(&packet).unwrap() as u32;
+                    if sent < packet.len() as u32 {
+                        eprintln!("socket dropped some bytes");
+                    }
+                    sent_packets_s.send(1).unwrap();
+                    sent_bytes_s.send(sent as u32).unwrap();
+                }
+            }
         });
 
         loop {
-                
             let mut udp_recv_buffer = vec![0u8; self.buffer_r];
             let poll_result = self.udp_socket.recv(&mut udp_recv_buffer);
 
@@ -126,30 +160,17 @@ impl Transmitter {
 
                     // if fec is disabled just immediately return raw data
                     if self.fec_disabled {
-                        let sent = self.send_packet(udp_packet)? as u32;
-                        if sent < udp_packet.len() as u32 {
-                            eprintln!("socket dropped some bytes");
-                        }
-                        sent_packets_s.send(1)?;
-                        sent_bytes_s.send(sent as u32)?;
-                        continue;
-                    }
-                    if let Some(block) = self.process_packet_fec(udp_packet) {
-                        for packet in block {
-                            let sent = self.send_packet(&packet)? as u32;
-                            if sent < packet.len() as u32 {
-                                eprintln!("socket dropped some bytes");
-                            }
-                            sent_packets_s.send(1)?;
-                            sent_bytes_s.send(sent as u32)?;
-                        }
+                        block_s.send(vec![udp_packet.to_vec()])?;
+                    } else if let Some(block) = self.fec.process_packet_fec(udp_packet) {
+                        block_s.send(block)?;
                     }
                 }
             }
             
         }
     }
-
+}
+impl TXFec {
     fn process_packet_fec(&mut self, packet: &[u8]) -> Option<Vec<Vec<u8>>> {
         // wait for block buffer to fill
         self.pkg_indices.push(self.block_buffer.len() as u16);
@@ -189,7 +210,8 @@ impl Transmitter {
         Some(block)
 
     }
-
+}
+impl TX {
     fn open_raw_socket(wifi_device: String) -> Result<OwnedFd, Box<dyn std::error::Error>> {
         let sockfd = unsafe { libc::socket(libc::PF_PACKET, libc::SOCK_RAW, 0) };
 
@@ -258,7 +280,6 @@ impl Transmitter {
 
         Ok(fd)
     }
-
     fn send_packet(
         &mut self,
         data: &[u8],

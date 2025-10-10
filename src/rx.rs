@@ -62,14 +62,16 @@ impl Receiver {
 
         // start logtask
         thread::spawn(move || {
-            println!(
-                "Packets R->T {}->{},\tBytes {}->{}",
-                received_packets_r.try_iter().sum::<u32>(),
-                sent_packets_r.try_iter().sum::<u32>(),
-                received_bytes_r.try_iter().sum::<u32>(),
-                sent_bytes_r.try_iter().sum::<u32>()
-            );
-            thread::sleep(log_interval);
+            loop {
+                println!(
+                    "Packets R->T {}->{},\tBytes {}->{}",
+                    received_packets_r.try_iter().sum::<u32>(),
+                    sent_packets_r.try_iter().sum::<u32>(),
+                    received_bytes_r.try_iter().sum::<u32>(),
+                    sent_bytes_r.try_iter().sum::<u32>()
+                );
+                thread::sleep(log_interval);
+            }
         });
 
         loop {
