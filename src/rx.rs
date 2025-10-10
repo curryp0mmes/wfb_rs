@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 use std::iter::once;
 use std::net::UdpSocket;
-use std::time::{Duration, Instant};
+use std::sync::mpsc::channel;
+use std::thread;
+use std::time::Duration;
 
 use super::fec::{get_raptorq_oti, FecHeader, FEC_HEADER_SIZE};
 use super::common;
@@ -53,34 +55,32 @@ impl Receiver {
 
     pub fn run(mut self, log_interval: Duration) -> Result<(), Box<dyn std::error::Error>> {
         
-        let mut log_time = Instant::now() + log_interval;
-        let mut received_packets = 0u64;
-        let mut received_bytes = 0u64;
-        let mut sent_packets = 0u64;
-        let mut sent_bytes = 0u64;
-        println!("Receiver ready!");
+        let (sent_packets_s, sent_packets_r) = channel();
+        let (sent_bytes_s, sent_bytes_r) = channel();
+        let (received_packets_s, received_packets_r) = channel();
+        let (received_bytes_s, received_bytes_r) = channel();
+
+        // start logtask
+        thread::spawn(move || {
+            println!(
+                "Packets R->T {}->{},\tBytes {}->{}",
+                received_packets_r.try_iter().sum::<u32>(),
+                sent_packets_r.try_iter().sum::<u32>(),
+                received_bytes_r.try_iter().sum::<u32>(),
+                sent_bytes_r.try_iter().sum::<u32>()
+            );
+            thread::sleep(log_interval);
+        });
 
         loop {
-            if Instant::now() >= log_time {
-                println!(
-                    "Packets R->T {}->{},\tBytes {}->{}",
-                    received_packets, sent_packets, received_bytes, sent_bytes
-                );
-                received_packets = 0;
-                received_bytes = 0;
-                sent_packets = 0;
-                sent_bytes = 0;
-                log_time = log_time + log_interval;
-            }
-
             for i in 0..self.wifi_captures.len() {
                 let wifi_capture = &mut self.wifi_captures[i];
                 match wifi_capture.next_packet() {
                     Ok(packet) if packet.len() > 0 => {
                         let packet = packet.data.to_vec();
                         if let Some(payload) = self.process_packet(&packet)? {
-                            received_packets += 1;
-                            received_bytes += payload.len() as u64;
+                            received_packets_s.send(1)?;
+                            received_bytes_s.send(payload.len() as u32)?;
                             if let Some(fec_header) = FecHeader::from_bytes(&payload) {
                                 if let Some(decoded_data) = self.process_fec_packet(fec_header, &payload[FEC_HEADER_SIZE..]) {
                                     for udp_pkg in decoded_data {
@@ -89,8 +89,8 @@ impl Receiver {
                                                 eprintln!("Error forwarding packet: {}", e);
                                             }
                                             Ok(sent) => {
-                                                sent_packets += 1;
-                                                sent_bytes += sent as u64;
+                                                sent_packets_s.send(1)?;
+                                                sent_bytes_s.send(sent as u32)?;
                                             }
                                         }
                                     }
@@ -102,8 +102,8 @@ impl Receiver {
                                         eprintln!("Error forwarding packet: {}", e);
                                     }
                                     Ok(sent) => {
-                                        sent_packets += 1;
-                                        sent_bytes += sent as u64;
+                                        sent_packets_s.send(1)?;
+                                        sent_bytes_s.send(sent as u32)?;
                                     }
                                 }
                             }

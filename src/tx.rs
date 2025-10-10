@@ -4,8 +4,9 @@ use std::iter::once;
 use std::mem::{size_of, zeroed};
 use std::net::UdpSocket;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
-use std::time::{Duration, Instant};
-use std::{fs, io};
+use std::sync::mpsc::channel;
+use std::time::Duration;
+use std::{fs, io, thread};
 
 use super::fec::{get_raptorq_oti, FecHeader};
 use super::common::{self, get_ieee80211_header, Bandwidth};
@@ -56,7 +57,6 @@ impl Transmitter {
 
         let wifi_socket = Self::open_raw_socket(wifi_device)?;
         let udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", udp_port))?;
-        udp_socket.set_nonblocking(true)?;
 
         Ok(Self {
             buffer_r: buffer_size_recv,
@@ -79,32 +79,31 @@ impl Transmitter {
 
     pub fn run(mut self, log_interval: Duration) -> Result<(), Box<dyn std::error::Error>> {
         
-        let mut log_time = Instant::now() + log_interval;
-        let mut sent_packets = 0u32;
-        let mut sent_bytes = 0u64;
-        let mut received_packets = 0u32;
-        let mut received_bytes = 0u64;
+        let (sent_packets_s, sent_packets_r) = channel();
+        let (sent_bytes_s, sent_bytes_r) = channel();
+        let (received_packets_s, received_packets_r) = channel();
+        let (received_bytes_s, received_bytes_r) = channel();
+
+        // start logtask
+        thread::spawn(move || {
+            println!(
+                "Packets R->T {}->{},\tBytes {}->{}",
+                received_packets_r.try_iter().sum::<u32>(),
+                sent_packets_r.try_iter().sum::<u32>(),
+                received_bytes_r.try_iter().sum::<u32>(),
+                sent_bytes_r.try_iter().sum::<u32>()
+            );
+            thread::sleep(log_interval);
+        });
 
         loop {
-            if Instant::now() >= log_time {
-                println!(
-                    "Packets R->T {}->{},\tBytes {}->{}",
-                    received_packets, sent_packets, received_bytes, sent_bytes
-                );
-                received_packets = 0;
-                received_bytes = 0;
-                sent_packets = 0;
-                sent_bytes = 0;
-                log_time = log_time + log_interval;
-            }
-
+                
             let mut udp_recv_buffer = vec![0u8; self.buffer_r];
             let poll_result = self.udp_socket.recv(&mut udp_recv_buffer);
 
             match poll_result {
                 Err(err) => match err.kind() {
                     io::ErrorKind::TimedOut => continue,
-                    io::ErrorKind::WouldBlock => continue,
                     err => {
                         eprintln!("Error polling udp input: {}", err);
                         continue;
@@ -122,27 +121,27 @@ impl Transmitter {
                     
                     let udp_packet = &udp_recv_buffer[..received];
 
-                    received_packets += 1;
-                    received_bytes += received as u64;
+                    received_packets_s.send(1)?;
+                    received_bytes_s.send(received as u32)?;
 
                     // if fec is disabled just immediately return raw data
                     if self.fec_disabled {
-                        let send = self.send_packet(udp_packet)? as u64;
-                        if send < udp_packet.len() as u64 {
+                        let sent = self.send_packet(udp_packet)? as u32;
+                        if sent < udp_packet.len() as u32 {
                             eprintln!("socket dropped some bytes");
                         }
-                        sent_bytes += send;
-                        sent_packets += 1;
+                        sent_packets_s.send(1)?;
+                        sent_bytes_s.send(sent as u32)?;
                         continue;
                     }
                     if let Some(block) = self.process_packet_fec(udp_packet) {
                         for packet in block {
-                            let send = self.send_packet(&packet)? as u64;
-                            if send < packet.len() as u64 {
+                            let sent = self.send_packet(&packet)? as u32;
+                            if sent < packet.len() as u32 {
                                 eprintln!("socket dropped some bytes");
                             }
-                            sent_bytes += send;
-                            sent_packets += 1;
+                            sent_packets_s.send(1)?;
+                            sent_bytes_s.send(sent as u32)?;
                         }
                     }
                 }
