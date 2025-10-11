@@ -19,13 +19,13 @@ struct Args {
 
     /// Data Input Port
     #[arg(short = 'u', long, default_value_t = 5600)]
-    udp_port: u16,
+    source_port: u16,
 
     /// Receiving Buffer Size
-    #[arg(short = 'R', long, default_value_t = 5_000)]
+    #[arg(short = 'R', long, default_value_t = 1_500)]
     buffer_size: usize,
 
-    // (max) Size of each package send over wifi (needs to match with rx)
+    // (max) Size of each package send over wifi
     #[arg(short = 'W', long, default_value_t = 800)]
     wifi_packet_size: u16,
 
@@ -116,17 +116,15 @@ fn main() {
     println!("{:?}", args);
 
     if args.wifi_setup {
-        let _ = common::set_monitor_mode(args.wifi_device.as_str()).unwrap();
+        common::set_monitor_mode(args.wifi_device.as_str()).unwrap();
     }
     if let Some(tx_power) = args.txpower {
-        let _ = common::set_tx_power(args.wifi_device.as_str(), tx_power).unwrap();
+        common::set_tx_power(args.wifi_device.as_str(), tx_power).unwrap();
     }
 
     let tx = Transmitter::new(
         args.radio_port,
         args.link_id,
-        args.buffer_size,
-        args.udp_port,
         args.bandwidth,
         args.short_gi,
         args.stbc,
@@ -141,5 +139,9 @@ fn main() {
         args.redundant_pkgs
     ).unwrap();
 
-    let _ = tx.run(args.log_interval).unwrap();
+    tx.run(
+        args.source_port,
+        args.buffer_size,
+        args.log_interval,
+    ).unwrap();
 }

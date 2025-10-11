@@ -24,10 +24,6 @@ struct Args {
     #[arg(short = 'i', long, default_value_t = 7669206)]
     link_id: u32,
 
-    /// Receiving Buffer Size
-    #[arg(short = 'R', long, default_value_t = 5_000)]
-    buffer_size: usize,
-
     /// Log Interval
     #[arg(short='l', long, default_value = "1000", value_parser = parse_duration)]
     log_interval: Duration,
@@ -58,16 +54,17 @@ fn main() {
         }
     }
 
-    let mut _rx = Receiver::new(
-        args.client_address,
-        args.client_port,
+    let rx = Receiver::new(
         args.radio_port,
         args.link_id,
-        args.buffer_size,
         args.wifi_devices,
     ).unwrap();
 
-    let _ = _rx.run(args.log_interval).unwrap();
+    rx.run(
+        args.client_address,
+        args.client_port,
+        args.log_interval
+    ).unwrap();
 }
 
 #[cfg(not(feature = "receiver"))]
