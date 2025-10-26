@@ -1,9 +1,7 @@
 use std::time::Duration;
 
 use clap::Parser;
-use wfb_rs::{common, Transmitter};
-
-use wfb_rs::common::Bandwidth;
+use wfb_rs::{common::{bandwidth::Bandwidth, utils}, Transmitter};
 
 /// Receiving side of wfb_rs
 #[derive(Parser, Debug)]
@@ -12,6 +10,10 @@ struct Args {
     /// Explicitly disable fec
     #[arg(short = 'f', long, default_value_t = false)]
     fec_disabled: bool,
+    
+    // Magic number to identify the device
+    #[arg(short = 'm', long, default_value_t = 0x57627273)]
+    magic: u32,
 
     /// Sending Radio Port
     #[arg(short = 'p', long, default_value_t = 0)]
@@ -116,13 +118,14 @@ fn main() {
     println!("{:?}", args);
 
     if args.wifi_setup {
-        common::set_monitor_mode(args.wifi_device.as_str()).unwrap();
+        utils::set_monitor_mode(args.wifi_device.as_str()).unwrap();
     }
     if let Some(tx_power) = args.txpower {
-        common::set_tx_power(args.wifi_device.as_str(), tx_power).unwrap();
+        utils::set_tx_power(args.wifi_device.as_str(), tx_power).unwrap();
     }
 
     let tx = Transmitter::new(
+        args.magic,
         args.radio_port,
         args.link_id,
         args.bandwidth,

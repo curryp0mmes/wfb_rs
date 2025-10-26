@@ -1,13 +1,16 @@
 use clap::Parser;
 use std::time::Duration;
-use wfb_rs::common;
 #[cfg(feature = "receiver")]
-use wfb_rs::Receiver;
+use wfb_rs::{common::utils, Receiver};
 
 /// Receiving side of wfb_rs
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    // Magic number to identify the device
+    #[arg(short = 'm', long, default_value_t = 0x57627273)]
+    magic: u32,
+
     /// Forwarding Address
     #[arg(short = 'c', long, default_value = "127.0.0.1")]
     client_address: String,
@@ -50,11 +53,12 @@ fn main() {
 
     if args.wifi_setup {
         for wifi in &args.wifi_devices {
-            common::set_monitor_mode(wifi.as_str()).unwrap();
+            utils::set_monitor_mode(wifi.as_str()).unwrap();
         }
     }
 
     let rx = Receiver::new(
+        args.magic,
         args.radio_port,
         args.link_id,
         args.wifi_devices,
