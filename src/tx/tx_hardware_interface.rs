@@ -91,7 +91,7 @@ impl TXHwInt {
     ) -> Result<usize, Box<dyn std::error::Error>> {
         // Create IEEE 802.11 and radiotap headers
         let ieee_header = hw_headers::get_ieee80211_header(0x08, self.channel_id, self.ieee_sequence);
-        self.ieee_sequence += 16;
+        self.ieee_sequence = self.ieee_sequence.wrapping_add(16);
 
         // Assemble payload from headers and data
         let iovecs = [

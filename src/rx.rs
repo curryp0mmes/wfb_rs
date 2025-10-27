@@ -58,8 +58,8 @@ impl Receiver {
                 let (received_packets, received_bytes): (u32, u32) = received_bytes_r.try_iter().fold((0, 0), |(count, sum), v| (count + 1, sum + v));
                 println!(
                     "Packets R->T {}->{},\tBytes {}->{}",
-                    sent_packets,
                     received_packets,
+                    sent_packets,
                     received_bytes,
                     sent_bytes,
                 );
@@ -69,28 +69,18 @@ impl Receiver {
 
         loop {
             for rx in &mut self.rxs {
-                if let Some(payload) = rx.receive_packet()? {
-                    received_bytes_s.send(payload.len() as u32)?;
-                    if let Some(decoded_data) = self.fec.process_fec_packet(&payload) {
-                        for udp_pkg in decoded_data {
-                            match udp_socket.send(&udp_pkg) {
-                                Err(e) => {
-                                    eprintln!("Error forwarding packet: {}", e);
-                                }
-                                Ok(sent) => {
-                                    sent_bytes_s.send(sent as u32)?;
-                                }
-                            }
+                let Some(payload) = rx.receive_packet()? else { continue; };
+                received_bytes_s.send(payload.len() as u32)?;
+
+                let Some(decoded_data) = self.fec.process_fec_packet(&payload) else { continue; };
+
+                for udp_pkg in decoded_data {
+                    match udp_socket.send(&udp_pkg) {
+                        Err(e) => {
+                            eprintln!("Error forwarding packet: {}", e);
                         }
-                    } else {
-                        // Forward packet directly without FEC processing
-                        match udp_socket.send(&payload) {
-                            Err(e) => {
-                                eprintln!("Error forwarding packet: {}", e);
-                            }
-                            Ok(sent) => {
-                                sent_bytes_s.send(sent as u32)?;
-                            }
+                        Ok(sent) => {
+                            sent_bytes_s.send(sent as u32)?;
                         }
                     }
                 }

@@ -72,8 +72,8 @@ impl Transmitter {
                 let (received_packets, received_bytes): (u32, u32) = received_bytes_r.try_iter().fold((0, 0), |(count, sum), v| (count + 1, sum + v));
                 println!(
                     "Packets R->T {}->{},\tBytes {}->{}",
-                    sent_packets,
                     received_packets,
+                    sent_packets,
                     received_bytes,
                     sent_bytes,
                 );
