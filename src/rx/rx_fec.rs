@@ -3,18 +3,16 @@ use std::mem::size_of;
 use std::iter::once;
 use std::collections::{HashMap, HashSet};
 
-use crate::common::fec::{self, FecHeader, FEC_HEADER_SIZE};
+use crate::common::fec::{self, FecHeader};
 
 pub(super) struct RXFec {
-    magic: u32,
     fec_decoders: HashMap<u8, SourceBlockDecoder>,
     decoded_blocks: HashSet<u8>,
 }
 
 impl RXFec {
-    pub fn new(magic: u32) -> Self {
+    pub fn new() -> Self {
         Self {
-            magic,
             fec_decoders: HashMap::new(),
             decoded_blocks: HashSet::new(),
         }
@@ -25,12 +23,9 @@ impl RXFec {
     ) -> Option<Vec<Vec<u8>>> {
 
         // decoding fec header, returning the raw data if none is found
-        let Some(fec_header) = FecHeader::from_bytes(self.magic, packet) else {
-            return Some(vec![packet.to_vec()])
+        let Some((fec_header, packet)) = FecHeader::from_bytes(packet) else {
+            return None;
         };
-
-        // dropping Fec Header part of the block id
-        let packet = &packet[FEC_HEADER_SIZE..];
 
         // get block id:
         let block_id = packet.get(0)?;

@@ -6,14 +6,16 @@ use std::sync::mpsc::channel;
 use std::time::Duration;
 use std::{io, thread};
 
-use super::common::{hw_headers, bandwidth::Bandwidth};
+use super::common::{hw_headers, magic_header, bandwidth::Bandwidth};
 
 use tx_hardware_interface::TXHwInt;
 use tx_fec::TXFec;
+use magic_header::MagicHeader;
 
 pub struct Transmitter {
     tx: TXHwInt,
     fec: Option<TXFec>,
+    magic_header: MagicHeader,
 }
 
 impl Transmitter {
@@ -46,15 +48,21 @@ impl Transmitter {
         let fec = if fec_disabled {
             None
         } else { Some(TXFec::new(
-            magic,
             min_block_size,
             wifi_packet_size,
             redundant_pkgs
         ))};
 
+        let magic_header = if fec_disabled {
+            MagicHeader::new(magic)
+        } else {
+            MagicHeader::new_fec(magic)
+        };
+
         Ok(Self {
             tx,
-            fec
+            fec,
+            magic_header,
         })
     }
 
@@ -85,7 +93,10 @@ impl Transmitter {
         
         thread::spawn(move || {
             for block in block_r.into_iter() {
-                for packet in block.into_iter() {
+                for wfb_packet in block.into_iter() {
+                    // add magic number
+                    let packet = [&self.magic_header.to_bytes(), &wfb_packet[..]].concat();
+                    // send via raw socket
                     let sent = self.tx.send_packet(&packet).unwrap() as u32;
                     if sent < packet.len() as u32 {
                         eprintln!("socket dropped some bytes");
@@ -122,16 +133,17 @@ impl Transmitter {
                     received_bytes_s.send(received as u32)?;
 
                     if let Some(fec) = self.fec.as_mut() {
-                        if let Some(block) = fec.process_packet_fec(udp_packet) {
+                        if let Some(block) = fec.process_packet_fec(&udp_packet) {
+                            // send to other thread for broadcast
                             block_s.send(block)?;
                         }
                     } else {
-                        // if fec is disabled just immediately return the raw block
+                        // if fec is disabled just send the raw block
+                        // send to other thread for broadcast
                         block_s.send(vec![udp_packet.to_vec()])?;
-                    }
+                    };
                 }
             }
-            
         }
     }
 }

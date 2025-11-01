@@ -4,7 +4,6 @@ use raptorq::SourceBlockEncoder;
 use crate::common::fec::{self, FecHeader};
 
 pub(super) struct TXFec {
-    magic: u32,
     block_id: u8,
     pkg_indices: Vec<u16>,
     block_buffer: Vec<u8>,
@@ -14,9 +13,8 @@ pub(super) struct TXFec {
 }
 
 impl TXFec {
-    pub fn new(magic: u32, min_block_size: u16, wifi_packet_size: u16, redundant_pkgs: u32) -> Self {
+    pub fn new(min_block_size: u16, wifi_packet_size: u16, redundant_pkgs: u32) -> Self {
         Self {
-            magic,
             block_id: 0,
             pkg_indices: Vec::new(),
             block_buffer: Vec::new(),
@@ -50,7 +48,7 @@ impl TXFec {
         let encoder = SourceBlockEncoder::new(self.block_id, &config, &self.block_buffer);
 
         let block = {
-            let header = FecHeader::new(self.magic, block_size, self.wifi_packet_size).to_bytes();
+            let header = FecHeader::new(block_size, self.wifi_packet_size).to_bytes();
             let mut packets = vec![];
             packets.extend(encoder.source_packets());
             packets.extend(encoder.repair_packets(0, self.redundant_pkgs));

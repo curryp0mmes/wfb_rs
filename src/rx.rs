@@ -8,10 +8,12 @@ use std::time::Duration;
 
 use rx_hardware_interface::RXHwInt;
 use rx_fec::RXFec;
+use crate::common::magic_header::MagicHeader;
 
 pub struct Receiver {
     rxs: Vec<RXHwInt>,
     fec: RXFec,
+    magic_header: MagicHeader,
 }
 
 impl Receiver {
@@ -29,11 +31,14 @@ impl Receiver {
             .collect::<Result<_, _>>()?;
 
 
-        let fec = RXFec::new(magic);
+        let fec = RXFec::new();
+
+        let magic_header = MagicHeader::new(magic);
 
         Ok(Self {
             rxs,
             fec,
+            magic_header,
         })
     }
 
@@ -69,10 +74,17 @@ impl Receiver {
 
         loop {
             for rx in &mut self.rxs {
-                let Some(payload) = rx.receive_packet()? else { continue; };
-                received_bytes_s.send(payload.len() as u32)?;
+                let Some(raw_packet) = rx.receive_packet()? else { continue; };
+                received_bytes_s.send(raw_packet.len() as u32)?;
 
-                let Some(decoded_data) = self.fec.process_fec_packet(&payload) else { continue; };
+                let Some((fec_pkg, wfb_packet)) = self.magic_header.from_bytes(&raw_packet) else { continue; };
+                
+                let decoded_data = if fec_pkg {
+                    let Some(decoded_data) = self.fec.process_fec_packet(&wfb_packet) else { continue; };
+                    decoded_data
+                } else {
+                    vec![wfb_packet.to_vec()]
+                };
 
                 for udp_pkg in decoded_data {
                     match udp_socket.send(&udp_pkg) {
