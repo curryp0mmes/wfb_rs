@@ -73,9 +73,28 @@ impl Receiver {
         });
 
         loop {
+            let (decoded_data, received_bytes) = self.recv()?;
+            received_bytes_s.send(received_bytes)?;
+
+            for udp_pkg in decoded_data {
+                match udp_socket.send(&udp_pkg) {
+                    Err(e) => {
+                        eprintln!("Error forwarding packet: {}", e);
+                    }
+                    Ok(sent) => {
+                        sent_bytes_s.send(sent as u32)?;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn recv(&mut self) -> Result<(Vec<Vec<u8>>, u32), Box<dyn std::error::Error>> {
+        let mut received_bytes = 0;
+        loop {
             for rx in &mut self.rxs {
                 let Some(raw_packet) = rx.receive_packet()? else { continue; };
-                received_bytes_s.send(raw_packet.len() as u32)?;
+                received_bytes += raw_packet.len() as u32;
 
                 let Some((fec_pkg, wfb_packet)) = self.magic_header.from_bytes(&raw_packet) else { continue; };
                 
@@ -86,16 +105,7 @@ impl Receiver {
                     vec![wfb_packet.to_vec()]
                 };
 
-                for udp_pkg in decoded_data {
-                    match udp_socket.send(&udp_pkg) {
-                        Err(e) => {
-                            eprintln!("Error forwarding packet: {}", e);
-                        }
-                        Ok(sent) => {
-                            sent_bytes_s.send(sent as u32)?;
-                        }
-                    }
-                }
+                return Ok((decoded_data, received_bytes));
             }
         }
     }

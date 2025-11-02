@@ -89,23 +89,6 @@ impl Transmitter {
             }
         });
 
-        let (block_s, block_r) = channel::<Vec<Vec<u8>>>();
-        
-        thread::spawn(move || {
-            for block in block_r.into_iter() {
-                for wfb_packet in block.into_iter() {
-                    // add magic number
-                    let packet = [&self.magic_header.to_bytes(), &wfb_packet[..]].concat();
-                    // send via raw socket
-                    let sent = self.tx.send_packet(&packet).unwrap() as u32;
-                    if sent < packet.len() as u32 {
-                        eprintln!("socket dropped some bytes");
-                    }
-                    sent_bytes_s.send(sent as u32).unwrap();
-                }
-            }
-        });
-
         loop {
             let mut udp_recv_buffer = vec![0u8; buffer_r];
             let poll_result = udp_socket.recv(&mut udp_recv_buffer);
@@ -132,18 +115,37 @@ impl Transmitter {
 
                     received_bytes_s.send(received as u32)?;
 
-                    if let Some(fec) = self.fec.as_mut() {
-                        if let Some(block) = fec.process_packet_fec(&udp_packet) {
-                            // send to other thread for broadcast
-                            block_s.send(block)?;
-                        }
-                    } else {
-                        // if fec is disabled just send the raw block
-                        // send to other thread for broadcast
-                        block_s.send(vec![udp_packet.to_vec()])?;
-                    };
+                    let sent = self.send(udp_packet);
+
+                    sent_bytes_s.send(sent as u32).unwrap();
                 }
             }
         }
+    }
+    pub fn send(&mut self, packet: &[u8]) -> u32 {
+        let block = if let Some(fec) = self.fec.as_mut() {
+            if let Some(block) = fec.process_packet_fec(packet) {
+                block
+            } else {
+                return 0;
+            }
+        } else {
+            // if fec is disabled just send the raw block
+            vec![packet.to_vec()]
+        };
+
+        let mut sent_bytes = 0;
+
+        for wfb_packet in block.into_iter() {
+            // add magic number
+            let packet = [&self.magic_header.to_bytes(), &wfb_packet[..]].concat();
+            // send via raw socket
+            let sent = self.tx.send_packet(&packet).unwrap() as u32;
+            if sent < packet.len() as u32 {
+                eprintln!("socket dropped some bytes");
+            }
+            sent_bytes += sent as u32;
+        }
+        return sent_bytes;
     }
 }
